@@ -1,4 +1,4 @@
 Pillow>=10,<13
 numpy>=1.26,<3
-opencv-python-headless==4.10.0.84
+opencv-python-headless==5.0.0.93
 PySide6-Essentials==6.7.0

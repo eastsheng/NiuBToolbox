@@ -24,6 +24,20 @@ Visit the project's [Releases page](https://github.com/eastsheng/NiuBToolbox/rel
 
 Run the installer and follow the prompts. You can then launch NiuB Toolbox from the Start menu.
 
+## Download the AI Model
+
+The installer and GitHub source do not include the AI model. Before using **AI Deep Repair**, download the official OpenCV LaMa model:
+
+[Download inpainting_lama_2025jan.onnx (92.6 MB)](https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx?download=true)
+
+Keep the original filename and save it in the application's `models` folder:
+
+```text
+NiuBToolbox/models/inpainting_lama_2025jan.onnx
+```
+
+The installer creates the `models` folder automatically. When running from source, place the model in the `models` folder at the repository root. Restart the application after adding the file.
+
 ## Run from Source
 
 Requires 64-bit Windows 10/11 and Python 3.11.
@@ -56,7 +70,6 @@ After installing the dependencies, you can also launch the application by double
 
 ## Use a Local AI Model
 
-Open **Settings** and click **Add Local Model** to select an `.onnx` model from your computer.
+Open **Settings** and click **Add Local Model** to select another `.onnx` model from anywhere on your computer.
 
-The model must be compatible with the LaMa interface and provide inputs named `image` and `mask`. Click **Use Built-in Model** at any time to switch back to the bundled model.
-
+The model must be compatible with the LaMa interface and provide inputs named `image` and `mask`. Click **Use Default Model** to switch back to the model in the `models` folder.

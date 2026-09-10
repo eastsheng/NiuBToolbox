@@ -35,6 +35,9 @@ installer-test.log
 config.json
 NiuBToolbox/config.json
 
+# AI models are downloaded separately by users
+models/*.onnx
+
 # IDE and operating-system metadata
 .idea/
 .vscode/
@@ -49,4 +52,3 @@ Desktop.ini
 *.swp
 *.swo
 ~$*
-

@@ -17,7 +17,7 @@ class InpaintEngine:
     def _model_path(cls) -> Path:
         if cls._custom_model_path is not None:
             return cls._custom_model_path
-        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+        base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
         return base / "models" / "inpainting_lama_2025jan.onnx"
 
     @classmethod
@@ -87,4 +87,3 @@ class InpaintEngine:
         selected = crop_mask > 0
         crop_result[selected] = output[selected]
         return result
-

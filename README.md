@@ -24,6 +24,20 @@ NiuB工具箱是一款简洁的 Windows 桌面工具软件。当前提供本地 
 
 运行安装程序并按照提示完成安装，即可从开始菜单启动 NiuB工具箱。
 
+## 下载 AI 模型
+
+安装包和 GitHub 源码不包含 AI 模型。使用“AI 深度修复”前，请下载 OpenCV 官方 LaMa 模型：
+
+[下载 inpainting_lama_2025jan.onnx（92.6 MB）](https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx?download=true)
+
+下载完成后，请保持文件名不变，并保存到软件目录的 `models` 文件夹：
+
+```text
+NiuBToolbox/models/inpainting_lama_2025jan.onnx
+```
+
+安装版会自动创建 `models` 文件夹；源码运行时则将模型放入项目根目录下的 `models` 文件夹。放置完成后重新启动软件即可使用。
+
 ## 从源码运行
 
 需要 Windows 10/11（64 位）和 Python 3.11。
@@ -56,7 +70,6 @@ python qt_app.py
 
 ## 使用本地 AI 模型
 
-点击左下角“设置”，选择“添加本地模型”，即可使用本机的 `.onnx` 模型。
+点击左下角“设置”，选择“添加本地模型”，也可以使用本机其他位置的 `.onnx` 模型。
 
-当前支持兼容 LaMa 接口、输入名称为 `image` 和 `mask` 的 ONNX 模型。点击“恢复内置模型”可以随时切回软件自带模型。
-
+当前支持兼容 LaMa 接口、输入名称为 `image` 和 `mask` 的 ONNX 模型。点击“使用默认模型”可以切回 `models` 文件夹中的默认模型。

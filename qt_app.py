@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QPoint, QRectF, QThread, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget
@@ -23,6 +23,11 @@ PALETTES = {
     "dark": {"window": "#171719", "card": "#242426", "side": "#202022", "text": "#f2f2f2", "muted": "#99999f", "line": "#343438", "canvas": "#151517", "hover": "#303034", "red": "#ec4141"},
 }
 
+
+def resource_path(relative: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / relative
+
 TEXT = {
     "zh": {
         "app": "NiuB工具箱", "my_tools": "我的工具", "watermark": "AI 去水印",
@@ -33,12 +38,14 @@ TEXT = {
         "choose_prompt": "请选择一张图片", "undo": "撤销", "clear": "清除选区",
         "export": "导出图片", "start_repair": "✦  开始修复", "settings_title": "设置",
         "language": "界面语言", "ai_model": "AI 模型", "current_model": "当前模型",
-        "builtin_model": "内置 LaMa 模型", "add_model": "＋ 添加本地模型", "reset_model": "恢复内置模型",
+        "builtin_model": "默认 LaMa 模型", "add_model": "＋ 添加本地模型", "reset_model": "使用默认模型",
         "model_hint": "支持 LaMa 接口兼容的 ONNX 模型，输入名需为 image 和 mask。",
         "add_model_title": "添加本地 AI 模型", "onnx_filter": "ONNX 模型 (*.onnx)",
         "image_filter": "图片 (*.png *.jpg *.jpeg *.webp *.bmp)", "open_failed": "打开失败",
         "repairing": "正在后台进行 AI 修复…", "repair_done": "修复完成，不满意可撤销",
         "repair_failed": "修复失败", "wait_close": "AI 修复仍在进行，请完成后再关闭",
+        "model_missing_title": "缺少 AI 模型",
+        "model_missing": "请先下载 inpainting_lama_2025jan.onnx，并保存到：\n{path}\n\n也可以在左下角“设置”中选择其他兼容模型。",
         "export_title": "导出图片", "export_name": "修复后的图片.png", "png_filter": "PNG 图片 (*.png)",
         "saved": "已保存：{name}",
     },
@@ -51,12 +58,14 @@ TEXT = {
         "choose_prompt": "Choose an image", "undo": "Undo", "clear": "Clear Selection",
         "export": "Export", "start_repair": "✦  Start Repair", "settings_title": "Settings",
         "language": "Language", "ai_model": "AI Model", "current_model": "Current Model",
-        "builtin_model": "Built-in LaMa model", "add_model": "＋ Add Local Model", "reset_model": "Use Built-in Model",
+        "builtin_model": "Default LaMa model", "add_model": "＋ Add Local Model", "reset_model": "Use Default Model",
         "model_hint": "Supports LaMa-compatible ONNX models with image and mask inputs.",
         "add_model_title": "Add Local AI Model", "onnx_filter": "ONNX Model (*.onnx)",
         "image_filter": "Images (*.png *.jpg *.jpeg *.webp *.bmp)", "open_failed": "Open Failed",
         "repairing": "Running AI repair in the background…", "repair_done": "Repair complete — you can undo it",
         "repair_failed": "Repair Failed", "wait_close": "AI repair is still running. Please wait before closing.",
+        "model_missing_title": "AI Model Missing",
+        "model_missing": "Download inpainting_lama_2025jan.onnx and save it to:\n{path}\n\nYou can also select another compatible model from Settings.",
         "export_title": "Export Image", "export_name": "repaired-image.png", "png_filter": "PNG Image (*.png)",
         "saved": "Saved: {name}",
     },
@@ -301,6 +310,7 @@ class SettingsDialog(QDialog):
 class NiuBToolbox(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        self.setWindowIcon(QIcon(str(resource_path("assets/app-icon.ico"))))
         self.setMinimumSize(860, 600)
         self.resize(980, 680)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -493,6 +503,13 @@ class NiuBToolbox(QMainWindow):
 
     def repair(self) -> None:
         if self.repair_worker is not None or not self.image or not self.mask or not self.mask.getbbox(): return
+        if self.mode.currentIndex() == 0 and not InpaintEngine._model_path().exists():
+            QMessageBox.warning(
+                self,
+                self.tr("model_missing_title"),
+                self.tr("model_missing").format(path=InpaintEngine._model_path()),
+            )
+            return
         self.history.append((self.image.copy(), self.mask.copy()))
         rgba = np.asarray(self.image, dtype=np.uint8).copy()
         binary = np.where(np.asarray(self.mask, dtype=np.uint8) > 8, 255, 0).astype(np.uint8)
@@ -539,7 +556,14 @@ class NiuBToolbox(QMainWindow):
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("eastsheng.NiuBToolbox")
+        except (AttributeError, OSError):
+            pass
     app = QApplication(sys.argv)
     app.setApplicationName("NiuB工具箱")
+    app.setWindowIcon(QIcon(str(resource_path("assets/app-icon.ico"))))
     window = NiuBToolbox(); window.show()
     sys.exit(app.exec())

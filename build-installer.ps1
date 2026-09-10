@@ -12,7 +12,6 @@ if ($LASTEXITCODE -ne 0) { throw "Installing build dependencies failed." }
   --name "NiuBToolbox" `
   --icon "assets\app-icon.ico" `
   --add-data "assets;assets" `
-  --add-data "models;models" `
   --exclude-module tkinter `
   --exclude-module _tkinter `
   --exclude-module PIL.ImageTk `

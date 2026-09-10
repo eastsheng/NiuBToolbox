@@ -1,5 +1,5 @@
 #define MyAppName "NiuB工具箱"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "NiuB Toolbox"
 #define MyAppExeName "NiuBToolbox.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\NiuBToolbox
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-output
-OutputBaseFilename=NiuBToolbox-Setup-1.0.0
+OutputBaseFilename=NiuBToolbox-Setup-1.0.3
 SetupIconFile=assets\app-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
@@ -31,6 +31,9 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Files]
 Source: "dist-system\NiuBToolbox\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Dirs]
+Name: "{app}\models"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
