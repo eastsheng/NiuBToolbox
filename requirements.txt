@@ -2,3 +2,5 @@ Pillow>=10,<13
 numpy>=1.26,<3
 opencv-python-headless==5.0.0.93
 PySide6-Essentials==6.7.0
+markitdown[pdf]==0.1.7
+PyMuPDF>=1.24,<2

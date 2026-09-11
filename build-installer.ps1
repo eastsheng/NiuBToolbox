@@ -1,13 +1,9 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $env:PYINSTALLER_CONFIG_DIR = Join-Path $PSScriptRoot ".pyinstaller-cache"
-$buildPython = Join-Path $PSScriptRoot ".venv-build\Scripts\python.exe"
-if (-not (Test-Path $buildPython)) {
-  python -m venv ".venv-build"
-}
-& $buildPython -m pip install --disable-pip-version-check -r "requirements-build.txt"
+python -m pip install --disable-pip-version-check -r "requirements-build.txt"
 if ($LASTEXITCODE -ne 0) { throw "Installing build dependencies failed." }
-& $buildPython -m PyInstaller --noconfirm --clean --windowed --onedir --distpath dist-system --workpath build-system `
+python -m PyInstaller --noconfirm --clean --windowed --onedir --distpath dist-system --workpath build-system `
   --noupx `
   --name "NiuBToolbox" `
   --icon "assets\app-icon.ico" `
@@ -15,6 +11,25 @@ if ($LASTEXITCODE -ne 0) { throw "Installing build dependencies failed." }
   --exclude-module tkinter `
   --exclude-module _tkinter `
   --exclude-module PIL.ImageTk `
+  --exclude-module PyQt5 `
+  --exclude-module PyQt6 `
+  --exclude-module matplotlib `
+  --exclude-module IPython `
+  --exclude-module astroid `
+  --exclude-module nbformat `
+  --exclude-module jupyter `
+  --exclude-module jupyter_core `
+  --exclude-module zmq `
+  --exclude-module torch `
+  --exclude-module torchvision `
+  --exclude-module pandas `
+  --exclude-module scipy `
+  --exclude-module pytest `
+  --exclude-module numba `
+  --exclude-module llvmlite `
+  --exclude-module win32com `
+  --exclude-module pythoncom `
+  --exclude-module lz4 `
   --exclude-module pkg_resources `
   --exclude-module setuptools `
   qt_app.py

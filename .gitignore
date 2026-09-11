@@ -35,6 +35,10 @@ installer-test.log
 config.json
 NiuBToolbox/config.json
 
+# PDF-to-Markdown generated output
+*_markdown/
+*_markdown_*/
+
 # AI models are downloaded separately by users
 models/*.onnx
 

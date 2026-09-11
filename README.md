@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-NiuB工具箱是一款简洁的 Windows 桌面工具软件。当前提供本地 AI 图片去水印功能，后续将持续增加更多实用工具。
+NiuB工具箱是一款简洁的 Windows 桌面工具软件，提供本地 AI 图片去水印和 PDF 转 Markdown 等实用工具。
 
 图片处理和 AI 推理均在本机完成，无需上传图片。
 
@@ -17,6 +17,9 @@ NiuB工具箱是一款简洁的 Windows 桌面工具软件。当前提供本地 
 - 支持浅色和深色模式
 - 支持简体中文与 English 即时切换
 - 后台执行 AI 修复，处理时界面仍可正常响应
+- PDF 转 Markdown，提取正文与图片
+- 自动提取 PDF 中的图片，并在 Markdown 正文中的相应位置显示
+- 转换任务在后台运行，界面不会卡死
 
 ## 下载与安装
 
@@ -40,13 +43,11 @@ NiuBToolbox/models/inpainting_lama_2025jan.onnx
 
 ## 从源码运行
 
-需要 Windows 10/11（64 位）和 Python 3.11。
+需要 Windows 10/11（64 位）和 Python 3.11。以下命令直接使用系统 Python，无需创建虚拟环境。
 
 ```powershell
 git clone https://github.com/eastsheng/NiuBToolbox.git
 cd NiuBToolbox
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python qt_app.py
 ```
@@ -55,12 +56,31 @@ python qt_app.py
 
 ## 使用方法
 
+### 图片去水印
+
 1. 点击“选择图片”导入需要处理的图片。
 2. 调整画笔大小，涂抹需要移除的水印或对象。
 3. 选择“AI 深度修复”或“快速修复”。
 4. 点击“开始修复”等待处理完成。
 5. 如果效果不满意，可以点击“撤销”恢复。
 6. 点击“导出图片”保存最终结果。
+
+### PDF 转 Markdown
+
+1. 在左侧选择“PDF 转 Markdown”。
+2. 点击“选择 PDF”并选择文件。
+3. 点击“开始转换”。
+4. 转换完成后点击“打开输出文件夹”。
+
+软件会在原 PDF 旁创建 `文件名_markdown` 文件夹，其中包括：
+
+```text
+文件名_markdown/
+├─ 文件名.md
+└─ images/    PDF 中提取的图片
+```
+
+Markdown 正文由 [Microsoft MarkItDown](https://github.com/microsoft/markitdown) 提取。软件会按照 PDF 内容块的位置，将提取的图片插入正文中的相应位置。
 
 ## 切换语言和主题
 

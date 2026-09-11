@@ -12,10 +12,12 @@ from PySide6.QtCore import QPoint, QRectF, QThread, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
-    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget
+    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton, QSlider,
+    QStackedWidget, QVBoxLayout, QWidget
 )
 
 from tools.inpaint_engine import InpaintEngine
+from tools.pdf_to_markdown import PdfToMarkdownConverter
 
 
 PALETTES = {
@@ -30,7 +32,7 @@ def resource_path(relative: str) -> Path:
 
 TEXT = {
     "zh": {
-        "app": "NiuB工具箱", "my_tools": "我的工具", "watermark": "AI 去水印",
+        "app": "NiuB工具箱", "my_tools": "我的工具", "image_processing": "图片处理", "file_processing": "文件处理", "watermark": "AI 去水印",
         "local_private": "●  本地处理 · 图片不会上传", "settings": "⚙   设置",
         "local_process": "图片全程在本地处理", "delete_image": "删除图片", "choose_image": "选择图片",
         "canvas_hint": "选择图片后，用画笔涂抹需要移除的区域", "brush_size": "画笔大小",
@@ -48,9 +50,18 @@ TEXT = {
         "model_missing": "请先下载 inpainting_lama_2025jan.onnx，并保存到：\n{path}\n\n也可以在左下角“设置”中选择其他兼容模型。",
         "export_title": "导出图片", "export_name": "修复后的图片.png", "png_filter": "PNG 图片 (*.png)",
         "saved": "已保存：{name}",
+        "pdf_tool": "PDF 转 Markdown", "pdf_title": "PDF 转 Markdown",
+        "pdf_subtitle": "提取 PDF 正文与图片，并在 Markdown 中按原文位置显示",
+        "choose_pdf": "选择 PDF", "no_pdf": "请选择一个 PDF 文件",
+        "convert_pdf": "开始转换", "open_output": "打开输出文件夹",
+        "pdf_filter": "PDF 文件 (*.pdf)", "pdf_failed": "PDF 转换失败",
+        "pdf_done": "转换完成：{name}", "extracting_text": "正在提取 PDF 正文…",
+        "extracting_images": "正在提取并定位 PDF 图片…", "rendering_pages": "正在处理 PDF 内容…",
+        "saving": "正在保存 Markdown…", "done": "转换完成",
+        "wait_close_pdf": "PDF 仍在转换，请完成后再关闭",
     },
     "en": {
-        "app": "NiuB Toolbox", "my_tools": "My Tools", "watermark": "AI Watermark Remover",
+        "app": "NiuB Toolbox", "my_tools": "My Tools", "image_processing": "Image Processing", "file_processing": "File Processing", "watermark": "AI Watermark Remover",
         "local_private": "●  Local processing · Nothing is uploaded", "settings": "⚙   Settings",
         "local_process": "Images are processed entirely on this device", "delete_image": "Remove Image", "choose_image": "Choose Image",
         "canvas_hint": "Choose an image, then paint over the area to remove", "brush_size": "Brush Size",
@@ -68,6 +79,15 @@ TEXT = {
         "model_missing": "Download inpainting_lama_2025jan.onnx and save it to:\n{path}\n\nYou can also select another compatible model from Settings.",
         "export_title": "Export Image", "export_name": "repaired-image.png", "png_filter": "PNG Image (*.png)",
         "saved": "Saved: {name}",
+        "pdf_tool": "PDF to Markdown", "pdf_title": "PDF to Markdown",
+        "pdf_subtitle": "Extract PDF text and place images at their corresponding Markdown positions",
+        "choose_pdf": "Choose PDF", "no_pdf": "Choose a PDF file",
+        "convert_pdf": "Convert", "open_output": "Open Output Folder",
+        "pdf_filter": "PDF Files (*.pdf)", "pdf_failed": "PDF Conversion Failed",
+        "pdf_done": "Conversion complete: {name}", "extracting_text": "Extracting PDF text…",
+        "extracting_images": "Extracting and positioning PDF images…", "rendering_pages": "Processing PDF content…",
+        "saving": "Saving Markdown…", "done": "Conversion complete",
+        "wait_close_pdf": "PDF conversion is still running. Please wait before closing.",
     },
 }
 
@@ -108,6 +128,111 @@ class RepairWorker(QThread):
             self.succeeded.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
+
+
+class PdfConvertWorker(QThread):
+    progress = Signal(str, int)
+    succeeded = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, pdf_path: str, language: str, parent=None) -> None:
+        super().__init__(parent)
+        self.pdf_path = pdf_path
+        self.language = language
+
+    def run(self) -> None:
+        try:
+            converter = PdfToMarkdownConverter(self.language)
+            output = converter.convert(
+                self.pdf_path,
+                lambda key, percent: self.progress.emit(key, percent),
+            )
+            self.succeeded.emit(str(output))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class PdfToMarkdownPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window
+        self.pdf_path: str | None = None
+        self.output_path: str | None = None
+        self.worker: PdfConvertWorker | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 17, 22, 20)
+        layout.setSpacing(12)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); self.subtitle.setWordWrap(True); layout.addWidget(self.subtitle)
+
+        card = QFrame(); card.setObjectName("toolbar")
+        card_layout = QVBoxLayout(card); card_layout.setContentsMargins(22, 22, 22, 22); card_layout.setSpacing(14)
+        self.file_label = QLabel(); self.file_label.setAlignment(Qt.AlignCenter); self.file_label.setWordWrap(True)
+        card_layout.addStretch(); card_layout.addWidget(self.file_label)
+        row = QHBoxLayout(); row.addStretch()
+        self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_pdf); row.addWidget(self.choose_btn)
+        self.convert_btn = QPushButton(); self.convert_btn.clicked.connect(self.convert_pdf); row.addWidget(self.convert_btn)
+        self.open_btn = QPushButton(); self.open_btn.clicked.connect(self.open_output); row.addWidget(self.open_btn)
+        row.addStretch(); card_layout.addLayout(row)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setValue(0); self.progress.setTextVisible(False); card_layout.addWidget(self.progress)
+        self.status = QLabel(); self.status.setObjectName("muted"); self.status.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.status)
+        card_layout.addStretch(); layout.addWidget(card, 1)
+        self.retranslate(); self.update_actions()
+
+    def retranslate(self) -> None:
+        t = self.window.tr
+        self.title.setText(t("pdf_title")); self.subtitle.setText(t("pdf_subtitle"))
+        self.choose_btn.setText(t("choose_pdf")); self.convert_btn.setText(t("convert_pdf")); self.open_btn.setText(t("open_output"))
+        if self.pdf_path is None:
+            self.file_label.setText(t("no_pdf"))
+        if self.worker is None and self.output_path is None:
+            self.status.setText("")
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None
+        self.choose_btn.setEnabled(not busy)
+        self.convert_btn.setEnabled(self.pdf_path is not None and not busy)
+        self.open_btn.setEnabled(self.output_path is not None and not busy)
+
+    def choose_pdf(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("choose_pdf"), "", self.window.tr("pdf_filter"))
+        if not path:
+            return
+        self.pdf_path = path; self.output_path = None; self.progress.setValue(0)
+        self.file_label.setText(f"{Path(path).name}\n{path}"); self.status.setText(""); self.update_actions()
+
+    def convert_pdf(self) -> None:
+        if self.worker is not None or self.pdf_path is None:
+            return
+        self.output_path = None; self.progress.setValue(0)
+        self.worker = PdfConvertWorker(self.pdf_path, self.window.language, self)
+        self.worker.progress.connect(self.on_progress); self.worker.succeeded.connect(self.on_succeeded)
+        self.worker.failed.connect(self.on_failed); self.worker.finished.connect(self.on_finished)
+        self.worker.start(); self.update_actions()
+
+    def on_progress(self, key: str, percent: int) -> None:
+        self.progress.setValue(percent)
+        if key in TEXT[self.window.language]:
+            self.status.setText(self.window.tr(key))
+
+    def on_succeeded(self, output_path: str) -> None:
+        self.output_path = output_path; self.progress.setValue(100)
+        self.status.setText(self.window.tr("pdf_done").format(name=Path(output_path).name))
+
+    def on_failed(self, message: str) -> None:
+        self.progress.setValue(0); self.status.setText(self.window.tr("pdf_failed"))
+        QMessageBox.critical(self, self.window.tr("pdf_failed"), message)
+
+    def on_finished(self) -> None:
+        worker = self.worker; self.worker = None
+        if worker is not None:
+            worker.deleteLater()
+        self.update_actions()
+
+    def open_output(self) -> None:
+        if self.output_path and Path(self.output_path).is_dir():
+            os.startfile(self.output_path)
 
 
 class ImageCanvas(QWidget):
@@ -345,10 +470,15 @@ class NiuBToolbox(QMainWindow):
         self.titlebar = TitleBar(self); self.titlebar.theme_clicked.connect(self.toggle_theme); root.addWidget(self.titlebar)
         body = QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0); root.addLayout(body)
 
-        side = QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(172)
+        side = QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(210)
         side_layout = QVBoxLayout(side); side_layout.setContentsMargins(12, 22, 12, 14)
         self.tools_label = QLabel(); self.tools_label.setObjectName("muted"); side_layout.addWidget(self.tools_label)
-        self.active_btn = QPushButton(); self.active_btn.setObjectName("navActive"); side_layout.addWidget(self.active_btn)
+        self.active_btn = QPushButton(); self.active_btn.setObjectName("navButton"); self.active_btn.setCheckable(True)
+        self.active_btn.clicked.connect(lambda: self.show_tool(0)); side_layout.addWidget(self.active_btn)
+        side_layout.addSpacing(12)
+        self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); side_layout.addWidget(self.file_tools_label)
+        self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
+        self.pdf_btn.clicked.connect(lambda: self.show_tool(1)); side_layout.addWidget(self.pdf_btn)
         side_layout.addStretch()
         self.settings_btn = QPushButton("⚙   设置"); self.settings_btn.clicked.connect(lambda: SettingsDialog(self).exec()); side_layout.addWidget(self.settings_btn)
         self.privacy_label = QLabel(); self.privacy_label.setObjectName("muted"); side_layout.addWidget(self.privacy_label)
@@ -367,8 +497,17 @@ class NiuBToolbox(QMainWindow):
         top = QHBoxLayout(); self.brush_label = QLabel(); top.addWidget(self.brush_label); slider = QSlider(Qt.Horizontal); slider.setRange(8, 120); slider.setValue(32); slider.setFixedWidth(145); slider.valueChanged.connect(lambda value: setattr(self.canvas, "brush", value)); top.addWidget(slider)
         top.addSpacing(14); self.mode_label = QLabel(); top.addWidget(self.mode_label); self.mode = QComboBox(); self.mode.setObjectName("repairMode"); self.mode.setFixedWidth(215); top.addWidget(self.mode); top.addStretch(); self.status = QLabel(); self.status.setObjectName("muted"); top.addWidget(self.status); tool.addLayout(top)
         actions = QHBoxLayout(); self.undo_btn = QPushButton(); self.undo_btn.clicked.connect(self.undo); actions.addWidget(self.undo_btn); self.clear_btn = QPushButton(); self.clear_btn.clicked.connect(self.clear_mask); actions.addWidget(self.clear_btn); actions.addStretch(); self.export_btn = QPushButton(); self.export_btn.clicked.connect(self.export); actions.addWidget(self.export_btn); self.repair_btn = QPushButton(); self.repair_btn.setObjectName("primary"); self.repair_btn.clicked.connect(self.repair); actions.addWidget(self.repair_btn); tool.addLayout(actions)
-        content_layout.addWidget(toolbar); body.addWidget(content, 1)
+        content_layout.addWidget(toolbar)
+        self.pdf_panel = PdfToMarkdownPanel(self)
+        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.pdf_panel)
+        body.addWidget(self.tool_stack, 1)
+        self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
+
+    def show_tool(self, index: int) -> None:
+        self.tool_stack.setCurrentIndex(index)
+        self.active_btn.setChecked(index == 0)
+        self.pdf_btn.setChecked(index == 1)
 
     def load_settings(self) -> dict:
         try: return json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -393,8 +532,10 @@ class NiuBToolbox(QMainWindow):
         self.setWindowTitle(self.tr("app"))
         QApplication.instance().setApplicationName(self.tr("app"))
         self.titlebar.retranslate()
-        self.tools_label.setText(self.tr("my_tools"))
+        self.tools_label.setText(self.tr("image_processing"))
+        self.file_tools_label.setText(self.tr("file_processing"))
         self.active_btn.setText("✦   " + self.tr("watermark"))
+        self.pdf_btn.setText("▤   " + self.tr("pdf_tool"))
         self.settings_btn.setText(self.tr("settings"))
         self.privacy_label.setText(self.tr("local_private"))
         self.page_title.setText(self.tr("watermark"))
@@ -417,6 +558,7 @@ class NiuBToolbox(QMainWindow):
         self.repair_btn.setText(self.tr("start_repair"))
         if self.image is None:
             self.status.setText(self.tr("choose_prompt"))
+        self.pdf_panel.retranslate()
 
     def toggle_theme(self) -> None:
         self.theme = "dark" if self.theme == "light" else "light"
@@ -438,7 +580,8 @@ class NiuBToolbox(QMainWindow):
             #pageTitle {{ font-size:22px; font-weight:700; }} #muted {{ color:{p['muted']}; font-size:11px; }}
             QPushButton {{ background:transparent; border:1px solid {p['line']}; border-radius:7px; padding:7px 13px; }} QPushButton:hover {{ background:{p['hover']}; }} QPushButton:disabled {{ color:{p['muted']}; }}
             #primary {{ background:{p['red']}; color:white; border:0; font-weight:600; }} #primary:hover {{ background:#d93636; }}
-            #navActive {{ background:{p['hover']}; color:{p['red']}; border:0; text-align:left; font-weight:600; padding:10px; }}
+            QPushButton#navButton {{ border:0; text-align:left; padding:10px; }}
+            QPushButton#navButton:checked {{ background:{p['hover']}; color:{p['red']}; font-weight:600; }}
             #windowButton, #closeButton {{ border:0; border-radius:6px; min-width:28px; padding:6px 8px; }} #closeButton:hover {{ background:{p['red']}; color:white; }}
             #toolbar {{ background:{p['card']}; border:1px solid {p['line']}; border-radius:10px; }}
             QComboBox#repairMode {{ background:{p['card']}; border:1px solid {p['line']}; border-radius:9px; padding:6px 36px 6px 12px; min-height:20px; }}
@@ -448,6 +591,8 @@ class NiuBToolbox(QMainWindow):
             QComboBox#repairMode::down-arrow {{ image:url({arrow_path}); width:12px; height:8px; }}
             QComboBox#repairMode QAbstractItemView {{ background:{p['card']}; color:{p['text']}; border:1px solid {p['line']}; border-radius:9px; padding:5px; outline:0; selection-background-color:{p['red']}; selection-color:white; }}
             QComboBox#repairMode QAbstractItemView::item {{ min-height:30px; padding-left:9px; border-radius:6px; }}
+            QProgressBar {{ background:{p['hover']}; border:0; border-radius:4px; min-height:8px; max-height:8px; }}
+            QProgressBar::chunk {{ background:{p['red']}; border-radius:4px; }}
             QDialog {{ background:{p['window']}; }}
         """)
         self.canvas.setStyleSheet(f"background:{p['canvas']}; border:1px solid {p['line']}; border-radius:10px;")
@@ -545,6 +690,10 @@ class NiuBToolbox(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.repair_worker is not None:
             self.status.setText(self.tr("wait_close"))
+            event.ignore()
+            return
+        if self.pdf_panel.worker is not None:
+            self.pdf_panel.status.setText(self.tr("wait_close_pdf"))
             event.ignore()
             return
         super().closeEvent(event)

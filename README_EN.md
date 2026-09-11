@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-NiuB Toolbox is a clean Windows desktop utility. It currently provides local AI-powered image watermark removal, with more useful tools planned for future updates.
+NiuB Toolbox is a clean Windows desktop utility for local AI-powered image watermark removal and PDF-to-Markdown conversion.
 
 All image processing and AI inference run locally on your device. Images do not need to be uploaded.
 
@@ -17,6 +17,9 @@ All image processing and AI inference run locally on your device. Images do not 
 - Light and dark themes
 - Instant switching between Simplified Chinese and English
 - Background AI processing that keeps the interface responsive
+- PDF-to-Markdown conversion with extracted text and images
+- Extracted PDF images placed at their corresponding positions in the Markdown body
+- Background PDF conversion that keeps the interface responsive
 
 ## Download and Install
 
@@ -40,13 +43,11 @@ The installer creates the `models` folder automatically. When running from sourc
 
 ## Run from Source
 
-Requires 64-bit Windows 10/11 and Python 3.11.
+Requires 64-bit Windows 10/11 and Python 3.11. The commands below use the system Python directly and do not create a virtual environment.
 
 ```powershell
 git clone https://github.com/eastsheng/NiuBToolbox.git
 cd NiuBToolbox
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python qt_app.py
 ```
@@ -55,12 +56,31 @@ After installing the dependencies, you can also launch the application by double
 
 ## How to Use
 
+### Remove Image Watermarks
+
 1. Click **Choose Image** and select an image.
 2. Adjust the brush size and paint over the watermark or object to remove.
 3. Select **AI Deep Repair** or **Quick Repair**.
 4. Click **Start Repair** and wait for processing to finish.
 5. Click **Undo** if you want to restore the previous result.
 6. Click **Export** to save the finished image.
+
+### Convert PDF to Markdown
+
+1. Select **PDF to Markdown** in the sidebar.
+2. Click **Choose PDF** and select a file.
+3. Click **Convert**.
+4. When conversion finishes, click **Open Output Folder**.
+
+The application creates a `file-name_markdown` folder next to the source PDF:
+
+```text
+file-name_markdown/
+├─ file-name.md
+└─ images/    Images extracted from the PDF
+```
+
+The Markdown body is extracted with [Microsoft MarkItDown](https://github.com/microsoft/markitdown). Extracted images are inserted near their corresponding locations according to the PDF content-block order.
 
 ## Language and Theme
 
