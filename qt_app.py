@@ -8,8 +8,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
-from PySide6.QtCore import QPoint, QRectF, QThread, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QThread, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QImage, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton, QSlider,
@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from tools.inpaint_engine import InpaintEngine
+from tools.image_compressor import ImageCompressor
+from tools.media_converter import MediaConverter
 from tools.pdf_to_markdown import PdfToMarkdownConverter
 
 
@@ -43,7 +45,7 @@ TEXT = {
         "builtin_model": "默认 LaMa 模型", "add_model": "＋ 添加本地模型", "reset_model": "使用默认模型",
         "model_hint": "支持 LaMa 接口兼容的 ONNX 模型，输入名需为 image 和 mask。",
         "add_model_title": "添加本地 AI 模型", "onnx_filter": "ONNX 模型 (*.onnx)",
-        "image_filter": "图片 (*.png *.jpg *.jpeg *.webp *.bmp)", "open_failed": "打开失败",
+        "image_filter": "常见图片 (*.jpg *.jpeg *.jpe *.jfif *.png *.webp *.bmp *.dib *.gif *.tif *.tiff *.ico *.heic *.heif *.avif *.tga *.ppm *.pgm *.pbm);;所有文件 (*.*)", "open_failed": "打开失败",
         "repairing": "正在后台进行 AI 修复…", "repair_done": "修复完成，不满意可撤销",
         "repair_failed": "修复失败", "wait_close": "AI 修复仍在进行，请完成后再关闭",
         "model_missing_title": "缺少 AI 模型",
@@ -59,6 +61,23 @@ TEXT = {
         "extracting_images": "正在提取并定位 PDF 图片…", "rendering_pages": "正在处理 PDF 内容…",
         "saving": "正在保存 Markdown…", "done": "转换完成",
         "wait_close_pdf": "PDF 仍在转换，请完成后再关闭",
+        "media_tool": "视频与 GIF 转换", "media_title": "视频与 GIF 相互转换",
+        "media_subtitle": "支持常见视频转 GIF，以及 GIF 转 MP4",
+        "choose_media": "选择文件", "no_media": "请选择视频或 GIF 文件",
+        "media_filter": "视频与 GIF (*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.wmv *.gif)",
+        "media_fps": "帧率", "media_size": "输出宽度", "original_fps": "原始帧率", "original_size": "原始尺寸",
+        "start_convert": "开始转换", "media_converting": "正在后台转换…",
+        "media_done": "转换完成：{name}", "media_failed": "媒体转换失败",
+        "video_to_gif": "视频 → GIF", "gif_to_video": "GIF → MP4",
+        "wait_close_media": "媒体仍在转换，请完成后再关闭",
+        "compress_tool": "图片压缩", "compress_title": "图片压缩",
+        "compress_subtitle": "保持原始尺寸，以高画质减小图片文件大小",
+        "choose_compress_image": "选择图片", "no_compress_image": "请选择需要压缩的图片",
+        "compress_format": "输出格式", "format_original": "保持原格式（推荐）", "compress_quality": "压缩质量 (%)",
+        "quality_hint": "可选择或输入 1–100，数值越低文件越小",
+        "start_compress": "开始压缩", "compressing": "正在后台压缩…",
+        "compress_done": "压缩完成：{name} · {before} → {after} · 减少 {saved}%",
+        "compress_failed": "图片压缩失败", "wait_close_compress": "图片仍在压缩，请完成后再关闭",
     },
     "en": {
         "app": "NiuB Toolbox", "my_tools": "My Tools", "image_processing": "Image Processing", "file_processing": "File Processing", "watermark": "AI Watermark Remover",
@@ -72,7 +91,7 @@ TEXT = {
         "builtin_model": "Default LaMa model", "add_model": "＋ Add Local Model", "reset_model": "Use Default Model",
         "model_hint": "Supports LaMa-compatible ONNX models with image and mask inputs.",
         "add_model_title": "Add Local AI Model", "onnx_filter": "ONNX Model (*.onnx)",
-        "image_filter": "Images (*.png *.jpg *.jpeg *.webp *.bmp)", "open_failed": "Open Failed",
+        "image_filter": "Common Images (*.jpg *.jpeg *.jpe *.jfif *.png *.webp *.bmp *.dib *.gif *.tif *.tiff *.ico *.heic *.heif *.avif *.tga *.ppm *.pgm *.pbm);;All Files (*.*)", "open_failed": "Open Failed",
         "repairing": "Running AI repair in the background…", "repair_done": "Repair complete — you can undo it",
         "repair_failed": "Repair Failed", "wait_close": "AI repair is still running. Please wait before closing.",
         "model_missing_title": "AI Model Missing",
@@ -88,6 +107,23 @@ TEXT = {
         "extracting_images": "Extracting and positioning PDF images…", "rendering_pages": "Processing PDF content…",
         "saving": "Saving Markdown…", "done": "Conversion complete",
         "wait_close_pdf": "PDF conversion is still running. Please wait before closing.",
+        "media_tool": "Video and GIF Converter", "media_title": "Video and GIF Converter",
+        "media_subtitle": "Convert common video formats to GIF, or GIF to MP4",
+        "choose_media": "Choose File", "no_media": "Choose a video or GIF file",
+        "media_filter": "Video and GIF (*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.wmv *.gif)",
+        "media_fps": "Frame Rate", "media_size": "Output Width", "original_fps": "Original Frame Rate", "original_size": "Original Size",
+        "start_convert": "Convert", "media_converting": "Converting in the background…",
+        "media_done": "Conversion complete: {name}", "media_failed": "Media Conversion Failed",
+        "video_to_gif": "Video → GIF", "gif_to_video": "GIF → MP4",
+        "wait_close_media": "Media conversion is still running. Please wait before closing.",
+        "compress_tool": "Image Compressor", "compress_title": "Image Compressor",
+        "compress_subtitle": "Reduce file size at high visual quality without changing dimensions",
+        "choose_compress_image": "Choose Image", "no_compress_image": "Choose an image to compress",
+        "compress_format": "Output Format", "format_original": "Keep Original (Recommended)", "compress_quality": "Compression Quality (%)",
+        "quality_hint": "Choose or enter 1–100; lower values create smaller files",
+        "start_compress": "Compress", "compressing": "Compressing in the background…",
+        "compress_done": "Done: {name} · {before} → {after} · {saved}% smaller",
+        "compress_failed": "Image Compression Failed", "wait_close_compress": "Image compression is still running. Please wait before closing.",
     },
 }
 
@@ -233,6 +269,253 @@ class PdfToMarkdownPanel(QWidget):
     def open_output(self) -> None:
         if self.output_path and Path(self.output_path).is_dir():
             os.startfile(self.output_path)
+
+
+class MediaConvertWorker(QThread):
+    progress = Signal(int)
+    succeeded = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, source_path: str, fps: int, max_width: int, parent=None) -> None:
+        super().__init__(parent)
+        self.source_path = source_path
+        self.fps = fps
+        self.max_width = max_width
+
+    def run(self) -> None:
+        try:
+            output = MediaConverter().convert(
+                self.source_path,
+                self.fps,
+                self.max_width,
+                self.progress.emit,
+            )
+            self.succeeded.emit(str(output))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class MediaConverterPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window
+        self.source_path: str | None = None
+        self.output_path: str | None = None
+        self.worker: MediaConvertWorker | None = None
+
+        layout = QVBoxLayout(self); layout.setContentsMargins(22, 17, 22, 20); layout.setSpacing(12)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); layout.addWidget(self.subtitle)
+        card = QFrame(); card.setObjectName("toolbar")
+        card_layout = QVBoxLayout(card); card_layout.setContentsMargins(22, 22, 22, 22); card_layout.setSpacing(14)
+        card_layout.addStretch()
+        self.file_label = QLabel(); self.file_label.setAlignment(Qt.AlignCenter); self.file_label.setWordWrap(True); card_layout.addWidget(self.file_label)
+        self.direction_label = QLabel(); self.direction_label.setObjectName("muted"); self.direction_label.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.direction_label)
+        options = QHBoxLayout(); options.addStretch()
+        self.fps_label = QLabel(); options.addWidget(self.fps_label)
+        self.fps_combo = QComboBox(); self.fps_combo.setObjectName("repairMode")
+        self.fps_combo.addItem("", 0)
+        for value in (8, 12, 15, 20, 24): self.fps_combo.addItem(f"{value} FPS", value)
+        self.fps_combo.setCurrentIndex(0); options.addWidget(self.fps_combo)
+        options.addSpacing(12); self.size_label = QLabel(); options.addWidget(self.size_label)
+        self.size_combo = QComboBox(); self.size_combo.setObjectName("repairMode"); options.addWidget(self.size_combo)
+        options.addStretch(); card_layout.addLayout(options)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_media); buttons.addWidget(self.choose_btn)
+        self.convert_btn = QPushButton(); self.convert_btn.clicked.connect(self.convert_media); buttons.addWidget(self.convert_btn)
+        self.open_btn = QPushButton(); self.open_btn.clicked.connect(self.open_output); buttons.addWidget(self.open_btn)
+        buttons.addStretch(); card_layout.addLayout(buttons)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setTextVisible(False); card_layout.addWidget(self.progress)
+        self.status = QLabel(); self.status.setObjectName("muted"); self.status.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.status)
+        card_layout.addStretch(); layout.addWidget(card, 1)
+        self.retranslate(); self.update_actions()
+
+    def retranslate(self) -> None:
+        t = self.window.tr
+        self.title.setText(t("media_title")); self.subtitle.setText(t("media_subtitle"))
+        self.fps_label.setText(t("media_fps")); self.size_label.setText(t("media_size"))
+        self.fps_combo.setItemText(0, t("original_fps"))
+        selected_width = self.size_combo.currentData()
+        self.size_combo.clear()
+        self.size_combo.addItem(t("original_size"), 0)
+        self.size_combo.addItem("480 px", 480); self.size_combo.addItem("720 px", 720); self.size_combo.addItem("1080 px", 1080)
+        index = self.size_combo.findData(selected_width if selected_width is not None else 0)
+        self.size_combo.setCurrentIndex(max(0, index))
+        self.choose_btn.setText(t("choose_media")); self.convert_btn.setText(t("start_convert")); self.open_btn.setText(t("open_output"))
+        if self.source_path is None: self.file_label.setText(t("no_media"))
+        self.update_direction()
+
+    def update_direction(self) -> None:
+        if self.source_path is None:
+            self.direction_label.setText("")
+        else:
+            self.direction_label.setText(self.window.tr("gif_to_video" if Path(self.source_path).suffix.lower() == ".gif" else "video_to_gif"))
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None
+        self.choose_btn.setEnabled(not busy); self.fps_combo.setEnabled(not busy); self.size_combo.setEnabled(not busy)
+        self.convert_btn.setEnabled(self.source_path is not None and not busy)
+        self.open_btn.setEnabled(self.output_path is not None and not busy)
+
+    def choose_media(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("choose_media"), "", self.window.tr("media_filter"))
+        if not path: return
+        self.source_path = path; self.output_path = None; self.progress.setValue(0); self.status.setText("")
+        self.file_label.setText(f"{Path(path).name}\n{path}"); self.update_direction(); self.update_actions()
+
+    def convert_media(self) -> None:
+        if self.worker is not None or self.source_path is None: return
+        self.output_path = None; self.progress.setValue(0); self.status.setText(self.window.tr("media_converting"))
+        self.worker = MediaConvertWorker(self.source_path, int(self.fps_combo.currentData()), int(self.size_combo.currentData()), self)
+        self.worker.progress.connect(self.progress.setValue); self.worker.succeeded.connect(self.on_succeeded)
+        self.worker.failed.connect(self.on_failed); self.worker.finished.connect(self.on_finished)
+        self.worker.start(); self.update_actions()
+
+    def on_succeeded(self, output_path: str) -> None:
+        self.output_path = output_path; self.progress.setValue(100)
+        self.status.setText(self.window.tr("media_done").format(name=Path(output_path).name))
+
+    def on_failed(self, message: str) -> None:
+        self.progress.setValue(0); self.status.setText(self.window.tr("media_failed"))
+        QMessageBox.critical(self, self.window.tr("media_failed"), message)
+
+    def on_finished(self) -> None:
+        worker = self.worker; self.worker = None
+        if worker is not None: worker.deleteLater()
+        self.update_actions()
+
+    def open_output(self) -> None:
+        if self.output_path and Path(self.output_path).is_file():
+            os.startfile(str(Path(self.output_path).parent))
+
+
+class ImageCompressWorker(QThread):
+    succeeded = Signal(str, int, int)
+    failed = Signal(str)
+
+    def __init__(self, source_path: str, output_format: str, quality: int, parent=None) -> None:
+        super().__init__(parent)
+        self.source_path = source_path
+        self.output_format = output_format
+        self.quality = quality
+
+    def run(self) -> None:
+        try:
+            output, before, after = ImageCompressor().compress(
+                self.source_path, self.output_format, self.quality
+            )
+            self.succeeded.emit(str(output), before, after)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class ImageCompressorPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window
+        self.source_path: str | None = None
+        self.output_path: str | None = None
+        self.worker: ImageCompressWorker | None = None
+
+        layout = QVBoxLayout(self); layout.setContentsMargins(22, 17, 22, 20); layout.setSpacing(12)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); self.subtitle.setWordWrap(True); layout.addWidget(self.subtitle)
+        card = QFrame(); card.setObjectName("toolbar")
+        card_layout = QVBoxLayout(card); card_layout.setContentsMargins(22, 22, 22, 22); card_layout.setSpacing(16)
+        card_layout.addStretch()
+        self.file_label = QLabel(); self.file_label.setAlignment(Qt.AlignCenter); self.file_label.setWordWrap(True); card_layout.addWidget(self.file_label)
+        options = QHBoxLayout(); options.addStretch()
+        self.format_label = QLabel(); options.addWidget(self.format_label)
+        self.format_combo = QComboBox(); self.format_combo.setObjectName("repairMode")
+        for label, value in (("", "ORIGINAL"), ("JPEG", "JPEG"), ("PNG", "PNG"), ("WebP", "WEBP"), ("GIF", "GIF"), ("TIFF", "TIFF"), ("BMP", "BMP"), ("ICO", "ICO"), ("HEIC", "HEIF"), ("AVIF", "AVIF"), ("TGA", "TGA")):
+            self.format_combo.addItem(label, value)
+        options.addWidget(self.format_combo); options.addSpacing(14)
+        self.quality_label = QLabel(); options.addWidget(self.quality_label)
+        self.quality_combo = QComboBox(); self.quality_combo.setObjectName("repairMode")
+        self.quality_combo.setEditable(True)
+        self.quality_combo.lineEdit().setValidator(QIntValidator(1, 100, self.quality_combo))
+        for value in (90, 85, 80, 70, 60, 50): self.quality_combo.addItem(str(value), value)
+        self.quality_combo.setCurrentText("90")
+        self.quality_combo.setFixedWidth(115)
+        options.addWidget(self.quality_combo); options.addStretch(); card_layout.addLayout(options)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_image); buttons.addWidget(self.choose_btn)
+        self.compress_btn = QPushButton(); self.compress_btn.clicked.connect(self.compress_image); buttons.addWidget(self.compress_btn)
+        self.open_btn = QPushButton(); self.open_btn.clicked.connect(self.open_output); buttons.addWidget(self.open_btn)
+        buttons.addStretch(); card_layout.addLayout(buttons)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setTextVisible(False); card_layout.addWidget(self.progress)
+        self.status = QLabel(); self.status.setObjectName("muted"); self.status.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.status)
+        card_layout.addStretch(); layout.addWidget(card, 1)
+        self.retranslate(); self.update_actions()
+
+    @staticmethod
+    def readable_size(size: int) -> str:
+        value = float(size)
+        for unit in ("B", "KB", "MB", "GB"):
+            if value < 1024 or unit == "GB":
+                return f"{value:.0f} {unit}" if unit == "B" else f"{value:.2f} {unit}"
+            value /= 1024
+        return f"{size} B"
+
+    def retranslate(self) -> None:
+        t = self.window.tr
+        self.title.setText(t("compress_title")); self.subtitle.setText(t("compress_subtitle"))
+        self.format_label.setText(t("compress_format")); self.format_combo.setItemText(0, t("format_original"))
+        self.quality_label.setText(t("compress_quality")); self.quality_combo.setToolTip(t("quality_hint"))
+        self.choose_btn.setText(t("choose_compress_image")); self.compress_btn.setText(t("start_compress")); self.open_btn.setText(t("open_output"))
+        if self.source_path is None: self.file_label.setText(t("no_compress_image"))
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None
+        self.choose_btn.setEnabled(not busy); self.format_combo.setEnabled(not busy); self.quality_combo.setEnabled(not busy)
+        self.compress_btn.setEnabled(self.source_path is not None and not busy)
+        self.open_btn.setEnabled(self.output_path is not None and not busy)
+
+    def choose_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("choose_compress_image"), "", self.window.tr("image_filter"))
+        if not path: return
+        try:
+            with Image.open(path) as image:
+                dimensions = f"{image.width}×{image.height}"
+        except Exception as exc:
+            QMessageBox.critical(self, self.window.tr("open_failed"), str(exc)); return
+        self.source_path = path; self.output_path = None; self.progress.setValue(0); self.status.setText("")
+        size = self.readable_size(Path(path).stat().st_size)
+        self.file_label.setText(f"{Path(path).name}\n{dimensions} · {size}")
+        self.update_actions()
+
+    def compress_image(self) -> None:
+        if self.worker is not None or self.source_path is None: return
+        quality_text = self.quality_combo.currentText().strip().rstrip("%").strip()
+        quality = max(1, min(100, int(quality_text or "90")))
+        self.quality_combo.setCurrentText(str(quality))
+        self.output_path = None; self.progress.setRange(0, 0); self.status.setText(self.window.tr("compressing"))
+        self.worker = ImageCompressWorker(
+            self.source_path, str(self.format_combo.currentData()), quality, self
+        )
+        self.worker.succeeded.connect(self.on_succeeded); self.worker.failed.connect(self.on_failed)
+        self.worker.finished.connect(self.on_finished); self.worker.start(); self.update_actions()
+
+    def on_succeeded(self, output_path: str, before: int, after: int) -> None:
+        self.output_path = output_path
+        saved = max(0, round((1 - after / before) * 100)) if before else 0
+        self.status.setText(self.window.tr("compress_done").format(
+            name=Path(output_path).name, before=self.readable_size(before), after=self.readable_size(after), saved=saved
+        ))
+
+    def on_failed(self, message: str) -> None:
+        self.status.setText(self.window.tr("compress_failed"))
+        QMessageBox.critical(self, self.window.tr("compress_failed"), message)
+
+    def on_finished(self) -> None:
+        self.progress.setRange(0, 100); self.progress.setValue(100 if self.output_path else 0)
+        worker = self.worker; self.worker = None
+        if worker is not None: worker.deleteLater()
+        self.update_actions()
+
+    def open_output(self) -> None:
+        if self.output_path and Path(self.output_path).is_file():
+            os.startfile(str(Path(self.output_path).parent))
 
 
 class ImageCanvas(QWidget):
@@ -436,7 +719,7 @@ class NiuBToolbox(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowIcon(QIcon(str(resource_path("assets/app-icon.ico"))))
-        self.setMinimumSize(860, 600)
+        self.setMinimumSize(820, 560)
         self.resize(980, 680)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -452,7 +735,10 @@ class NiuBToolbox(QMainWindow):
         self.image: Image.Image | None = None
         self.mask: Image.Image | None = None
         self.repair_worker: RepairWorker | None = None
+        self._resize_drag: tuple[Qt.Edges, QPoint, QRect] | None = None
         self._build_ui()
+        self._create_resize_handles()
+        QApplication.instance().installEventFilter(self)
         self.apply_theme()
         self.retranslate()
 
@@ -475,10 +761,14 @@ class NiuBToolbox(QMainWindow):
         self.tools_label = QLabel(); self.tools_label.setObjectName("muted"); side_layout.addWidget(self.tools_label)
         self.active_btn = QPushButton(); self.active_btn.setObjectName("navButton"); self.active_btn.setCheckable(True)
         self.active_btn.clicked.connect(lambda: self.show_tool(0)); side_layout.addWidget(self.active_btn)
+        self.compress_btn = QPushButton(); self.compress_btn.setObjectName("navButton"); self.compress_btn.setCheckable(True)
+        self.compress_btn.clicked.connect(lambda: self.show_tool(1)); side_layout.addWidget(self.compress_btn)
         side_layout.addSpacing(12)
         self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); side_layout.addWidget(self.file_tools_label)
         self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
-        self.pdf_btn.clicked.connect(lambda: self.show_tool(1)); side_layout.addWidget(self.pdf_btn)
+        self.pdf_btn.clicked.connect(lambda: self.show_tool(2)); side_layout.addWidget(self.pdf_btn)
+        self.media_btn = QPushButton(); self.media_btn.setObjectName("navButton"); self.media_btn.setCheckable(True)
+        self.media_btn.clicked.connect(lambda: self.show_tool(3)); side_layout.addWidget(self.media_btn)
         side_layout.addStretch()
         self.settings_btn = QPushButton("⚙   设置"); self.settings_btn.clicked.connect(lambda: SettingsDialog(self).exec()); side_layout.addWidget(self.settings_btn)
         self.privacy_label = QLabel(); self.privacy_label.setObjectName("muted"); side_layout.addWidget(self.privacy_label)
@@ -498,8 +788,10 @@ class NiuBToolbox(QMainWindow):
         top.addSpacing(14); self.mode_label = QLabel(); top.addWidget(self.mode_label); self.mode = QComboBox(); self.mode.setObjectName("repairMode"); self.mode.setFixedWidth(215); top.addWidget(self.mode); top.addStretch(); self.status = QLabel(); self.status.setObjectName("muted"); top.addWidget(self.status); tool.addLayout(top)
         actions = QHBoxLayout(); self.undo_btn = QPushButton(); self.undo_btn.clicked.connect(self.undo); actions.addWidget(self.undo_btn); self.clear_btn = QPushButton(); self.clear_btn.clicked.connect(self.clear_mask); actions.addWidget(self.clear_btn); actions.addStretch(); self.export_btn = QPushButton(); self.export_btn.clicked.connect(self.export); actions.addWidget(self.export_btn); self.repair_btn = QPushButton(); self.repair_btn.setObjectName("primary"); self.repair_btn.clicked.connect(self.repair); actions.addWidget(self.repair_btn); tool.addLayout(actions)
         content_layout.addWidget(toolbar)
+        self.compress_panel = ImageCompressorPanel(self)
         self.pdf_panel = PdfToMarkdownPanel(self)
-        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.pdf_panel)
+        self.media_panel = MediaConverterPanel(self)
+        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.media_panel)
         body.addWidget(self.tool_stack, 1)
         self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
@@ -507,7 +799,9 @@ class NiuBToolbox(QMainWindow):
     def show_tool(self, index: int) -> None:
         self.tool_stack.setCurrentIndex(index)
         self.active_btn.setChecked(index == 0)
-        self.pdf_btn.setChecked(index == 1)
+        self.compress_btn.setChecked(index == 1)
+        self.pdf_btn.setChecked(index == 2)
+        self.media_btn.setChecked(index == 3)
 
     def load_settings(self) -> dict:
         try: return json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -535,7 +829,9 @@ class NiuBToolbox(QMainWindow):
         self.tools_label.setText(self.tr("image_processing"))
         self.file_tools_label.setText(self.tr("file_processing"))
         self.active_btn.setText("✦   " + self.tr("watermark"))
+        self.compress_btn.setText("▣   " + self.tr("compress_tool"))
         self.pdf_btn.setText("▤   " + self.tr("pdf_tool"))
+        self.media_btn.setText("▶   " + self.tr("media_tool"))
         self.settings_btn.setText(self.tr("settings"))
         self.privacy_label.setText(self.tr("local_private"))
         self.page_title.setText(self.tr("watermark"))
@@ -559,6 +855,8 @@ class NiuBToolbox(QMainWindow):
         if self.image is None:
             self.status.setText(self.tr("choose_prompt"))
         self.pdf_panel.retranslate()
+        self.media_panel.retranslate()
+        self.compress_panel.retranslate()
 
     def toggle_theme(self) -> None:
         self.theme = "dark" if self.theme == "light" else "light"
@@ -599,6 +897,116 @@ class NiuBToolbox(QMainWindow):
 
     def toggle_maximize(self) -> None:
         self.showNormal() if self.isMaximized() else self.showMaximized()
+
+    def _resize_edges(self, global_position) -> Qt.Edges:
+        if self.isMaximized():
+            return Qt.Edges()
+        point = self.mapFromGlobal(global_position.toPoint())
+        # The visible rounded card sits 12 px inside the transparent top-level
+        # window. Detect around that visible edge, not around click-through pixels.
+        card_margin = 12
+        hit_width = 6
+        left_edge = card_margin
+        right_edge = self.width() - card_margin - 1
+        top_edge = card_margin
+        bottom_edge = self.height() - card_margin - 1
+        edges = Qt.Edges()
+        if abs(point.x() - left_edge) <= hit_width:
+            edges |= Qt.LeftEdge
+        elif abs(point.x() - right_edge) <= hit_width:
+            edges |= Qt.RightEdge
+        if abs(point.y() - top_edge) <= hit_width:
+            edges |= Qt.TopEdge
+        elif abs(point.y() - bottom_edge) <= hit_width:
+            edges |= Qt.BottomEdge
+        return edges
+
+    def _create_resize_handles(self) -> None:
+        self.resize_handles: list[QWidget] = []
+        definitions = (
+            (Qt.LeftEdge, Qt.SizeHorCursor, "left"),
+            (Qt.RightEdge, Qt.SizeHorCursor, "right"),
+            (Qt.TopEdge, Qt.SizeVerCursor, "top"),
+            (Qt.BottomEdge, Qt.SizeVerCursor, "bottom"),
+            (Qt.TopEdge | Qt.LeftEdge, Qt.SizeFDiagCursor, "top_left"),
+            (Qt.BottomEdge | Qt.LeftEdge, Qt.SizeBDiagCursor, "bottom_left"),
+            (Qt.BottomEdge | Qt.RightEdge, Qt.SizeFDiagCursor, "bottom_right"),
+        )
+        for edges, cursor, name in definitions:
+            handle = QWidget(self)
+            handle.setObjectName("resizeHandle")
+            handle.setProperty("resizeEdges", edges)
+            handle.setProperty("resizeName", name)
+            handle.setCursor(cursor)
+            handle.setStyleSheet("background: transparent;")
+            handle.show()
+            self.resize_handles.append(handle)
+        self._position_resize_handles()
+
+    def _position_resize_handles(self) -> None:
+        if not hasattr(self, "resize_handles"):
+            return
+        width, height = self.width(), self.height()
+        geometries = {
+            "left": QRect(8, 20, 9, max(0, height - 40)),
+            "right": QRect(width - 17, 62, 9, max(0, height - 82)),
+            "top": QRect(20, 8, max(0, width - 280), 9),
+            "bottom": QRect(20, height - 17, max(0, width - 40), 9),
+            "top_left": QRect(8, 8, 13, 13),
+            "bottom_left": QRect(8, height - 21, 13, 13),
+            "bottom_right": QRect(width - 21, height - 21, 13, 13),
+        }
+        for handle in self.resize_handles:
+            handle.setGeometry(geometries[handle.property("resizeName")])
+            handle.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_resize_handles()
+
+    @staticmethod
+    def _inside_button(widget) -> bool:
+        while widget is not None:
+            if isinstance(widget, QPushButton):
+                return True
+            widget = widget.parentWidget() if hasattr(widget, "parentWidget") else None
+        return False
+
+    def eventFilter(self, watched, event) -> bool:
+        belongs_to_window = isinstance(watched, QWidget) and (watched is self or self.isAncestorOf(watched))
+        if not belongs_to_window:
+            return super().eventFilter(watched, event)
+
+        if isinstance(event, QMouseEvent) and event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            if not self._inside_button(watched):
+                edges = watched.property("resizeEdges") or self._resize_edges(event.globalPosition())
+                if edges:
+                    self._resize_drag = (edges, event.globalPosition().toPoint(), self.geometry())
+                    self.grabMouse()
+                    return True
+
+        if isinstance(event, QMouseEvent) and event.type() == QEvent.MouseMove and self._resize_drag is not None:
+            edges, start_position, start_geometry = self._resize_drag
+            delta = event.globalPosition().toPoint() - start_position
+            geometry = QRect(start_geometry)
+            minimum_width = self.minimumWidth()
+            minimum_height = self.minimumHeight()
+            if edges & Qt.LeftEdge:
+                geometry.setLeft(min(start_geometry.left() + delta.x(), start_geometry.right() - minimum_width + 1))
+            if edges & Qt.RightEdge:
+                geometry.setRight(max(start_geometry.right() + delta.x(), start_geometry.left() + minimum_width - 1))
+            if edges & Qt.TopEdge:
+                geometry.setTop(min(start_geometry.top() + delta.y(), start_geometry.bottom() - minimum_height + 1))
+            if edges & Qt.BottomEdge:
+                geometry.setBottom(max(start_geometry.bottom() + delta.y(), start_geometry.top() + minimum_height - 1))
+            self.setGeometry(geometry)
+            return True
+
+        if isinstance(event, QMouseEvent) and event.type() == QEvent.MouseButtonRelease and self._resize_drag is not None:
+            self._resize_drag = None
+            self.releaseMouse()
+            return True
+        return super().eventFilter(watched, event)
 
     def open_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, self.tr("choose_image"), "", self.tr("image_filter"))
@@ -694,6 +1102,14 @@ class NiuBToolbox(QMainWindow):
             return
         if self.pdf_panel.worker is not None:
             self.pdf_panel.status.setText(self.tr("wait_close_pdf"))
+            event.ignore()
+            return
+        if self.media_panel.worker is not None:
+            self.media_panel.status.setText(self.tr("wait_close_media"))
+            event.ignore()
+            return
+        if self.compress_panel.worker is not None:
+            self.compress_panel.status.setText(self.tr("wait_close_compress"))
             event.ignore()
             return
         super().closeEvent(event)

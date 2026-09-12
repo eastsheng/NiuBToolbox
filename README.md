@@ -2,13 +2,15 @@
 
 English | [简体中文](README_ZH.md)
 
-NiuB Toolbox is a lightweight Windows desktop utility that brings together practical tools for image and file processing in one clean interface.
+NiuB Toolbox is a lightweight Windows desktop utility that brings together practical image processing and file conversion tools in one clean interface.
 
-The application supports light and dark themes, Simplified Chinese and English, and background processing for a responsive experience. Local content is processed on your device.
+It can remove unwanted image content with AI, compress and convert common image formats, convert between video and GIF, and turn PDF files into Markdown. The application supports light and dark themes, Simplified Chinese and English, and background processing for a responsive experience. Local content is processed on your device.
 
 ## Download
 
 Download the latest Windows installer from the [Releases page](https://github.com/eastsheng/NiuBToolbox/releases).
+
+The installer supports 64-bit Windows 10 and Windows 11. After installation, tools other than AI repair are ready to use without additional configuration.
 
 ## Local AI Model
 
