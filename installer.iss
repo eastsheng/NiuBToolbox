@@ -1,5 +1,5 @@
 #define MyAppName "NiuB工具箱"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "NiuB Toolbox"
 #define MyAppExeName "NiuBToolbox.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\NiuBToolbox
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-output
-OutputBaseFilename=NiuBToolbox-Setup-1.0.5
+OutputBaseFilename=NiuBToolbox-Setup-1.0.6
 SetupIconFile=assets\app-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64

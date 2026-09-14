@@ -8,6 +8,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir --distpath dist-sy
   --name "NiuBToolbox" `
   --icon "assets\app-icon.ico" `
   --add-data "assets;assets" `
+  --collect-all cajCvtPdf `
   --exclude-module tkinter `
   --exclude-module _tkinter `
   --exclude-module PIL.ImageTk `

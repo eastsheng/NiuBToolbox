@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from tools.inpaint_engine import InpaintEngine
 from tools.image_compressor import ImageCompressor
+from tools.caj_to_pdf import CajToPdfConverter
 from tools.media_converter import MediaConverter
 from tools.pdf_to_markdown import PdfToMarkdownConverter
 
@@ -78,6 +79,12 @@ TEXT = {
         "start_compress": "开始压缩", "compressing": "正在后台压缩…",
         "compress_done": "压缩完成：{name} · {before} → {after} · 减少 {saved}%",
         "compress_failed": "图片压缩失败", "wait_close_compress": "图片仍在压缩，请完成后再关闭",
+        "caj_tool": "CAJ 转 PDF", "caj_title": "CAJ 转 PDF",
+        "caj_subtitle": "在本地将 CAJ、NH 或 KDH 文献文件转换为 PDF",
+        "choose_caj": "选择 CAJ 文件", "no_caj": "请选择需要转换的 CAJ 文件",
+        "caj_filter": "CAJ 文件 (*.caj *.nh *.kdh)", "convert_caj": "开始转换",
+        "caj_converting": "正在后台转换…", "caj_done": "转换完成：{name}",
+        "caj_failed": "CAJ 转换失败", "wait_close_caj": "CAJ 仍在转换，请完成后再关闭",
     },
     "en": {
         "app": "NiuB Toolbox", "my_tools": "My Tools", "image_processing": "Image Processing", "file_processing": "File Processing", "watermark": "AI Watermark Remover",
@@ -124,6 +131,12 @@ TEXT = {
         "start_compress": "Compress", "compressing": "Compressing in the background…",
         "compress_done": "Done: {name} · {before} → {after} · {saved}% smaller",
         "compress_failed": "Image Compression Failed", "wait_close_compress": "Image compression is still running. Please wait before closing.",
+        "caj_tool": "CAJ to PDF", "caj_title": "CAJ to PDF",
+        "caj_subtitle": "Convert CAJ, NH, or KDH document files to PDF locally",
+        "choose_caj": "Choose CAJ File", "no_caj": "Choose a CAJ file to convert",
+        "caj_filter": "CAJ Files (*.caj *.nh *.kdh)", "convert_caj": "Convert",
+        "caj_converting": "Converting in the background…", "caj_done": "Conversion complete: {name}",
+        "caj_failed": "CAJ Conversion Failed", "wait_close_caj": "CAJ conversion is still running. Please wait before closing.",
     },
 }
 
@@ -518,6 +531,91 @@ class ImageCompressorPanel(QWidget):
             os.startfile(str(Path(self.output_path).parent))
 
 
+class CajConvertWorker(QThread):
+    succeeded = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, source_path: str, parent=None) -> None:
+        super().__init__(parent)
+        self.source_path = source_path
+
+    def run(self) -> None:
+        try:
+            output = CajToPdfConverter().convert(self.source_path)
+            self.succeeded.emit(str(output))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class CajToPdfPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window
+        self.source_path: str | None = None
+        self.output_path: str | None = None
+        self.worker: CajConvertWorker | None = None
+
+        layout = QVBoxLayout(self); layout.setContentsMargins(22, 17, 22, 20); layout.setSpacing(12)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); self.subtitle.setWordWrap(True); layout.addWidget(self.subtitle)
+        card = QFrame(); card.setObjectName("toolbar")
+        card_layout = QVBoxLayout(card); card_layout.setContentsMargins(22, 22, 22, 22); card_layout.setSpacing(14)
+        card_layout.addStretch()
+        self.file_label = QLabel(); self.file_label.setAlignment(Qt.AlignCenter); self.file_label.setWordWrap(True); card_layout.addWidget(self.file_label)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_file); buttons.addWidget(self.choose_btn)
+        self.convert_btn = QPushButton(); self.convert_btn.clicked.connect(self.convert_file); buttons.addWidget(self.convert_btn)
+        self.open_btn = QPushButton(); self.open_btn.clicked.connect(self.open_output); buttons.addWidget(self.open_btn)
+        buttons.addStretch(); card_layout.addLayout(buttons)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setTextVisible(False); card_layout.addWidget(self.progress)
+        self.status = QLabel(); self.status.setObjectName("muted"); self.status.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.status)
+        card_layout.addStretch(); layout.addWidget(card, 1)
+        self.retranslate(); self.update_actions()
+
+    def retranslate(self) -> None:
+        t = self.window.tr
+        self.title.setText(t("caj_title")); self.subtitle.setText(t("caj_subtitle"))
+        self.choose_btn.setText(t("choose_caj")); self.convert_btn.setText(t("convert_caj")); self.open_btn.setText(t("open_output"))
+        if self.source_path is None: self.file_label.setText(t("no_caj"))
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None
+        self.choose_btn.setEnabled(not busy)
+        self.convert_btn.setEnabled(self.source_path is not None and not busy)
+        self.open_btn.setEnabled(self.output_path is not None and not busy)
+
+    def choose_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("choose_caj"), "", self.window.tr("caj_filter"))
+        if not path: return
+        self.source_path = path; self.output_path = None; self.progress.setRange(0, 100); self.progress.setValue(0); self.status.setText("")
+        self.file_label.setText(f"{Path(path).name}\n{path}"); self.update_actions()
+
+    def convert_file(self) -> None:
+        if self.worker is not None or self.source_path is None: return
+        self.output_path = None; self.progress.setRange(0, 0); self.status.setText(self.window.tr("caj_converting"))
+        self.worker = CajConvertWorker(self.source_path, self)
+        self.worker.succeeded.connect(self.on_succeeded); self.worker.failed.connect(self.on_failed)
+        self.worker.finished.connect(self.on_finished); self.worker.start(); self.update_actions()
+
+    def on_succeeded(self, output_path: str) -> None:
+        self.output_path = output_path
+        self.status.setText(self.window.tr("caj_done").format(name=Path(output_path).name))
+
+    def on_failed(self, message: str) -> None:
+        self.status.setText(self.window.tr("caj_failed"))
+        QMessageBox.critical(self, self.window.tr("caj_failed"), message)
+
+    def on_finished(self) -> None:
+        self.progress.setRange(0, 100); self.progress.setValue(100 if self.output_path else 0)
+        worker = self.worker; self.worker = None
+        if worker is not None: worker.deleteLater()
+        self.update_actions()
+
+    def open_output(self) -> None:
+        if self.output_path and Path(self.output_path).is_file():
+            os.startfile(str(Path(self.output_path).parent))
+
+
 class ImageCanvas(QWidget):
     mask_changed = Signal()
 
@@ -767,8 +865,10 @@ class NiuBToolbox(QMainWindow):
         self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); side_layout.addWidget(self.file_tools_label)
         self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
         self.pdf_btn.clicked.connect(lambda: self.show_tool(2)); side_layout.addWidget(self.pdf_btn)
+        self.caj_btn = QPushButton(); self.caj_btn.setObjectName("navButton"); self.caj_btn.setCheckable(True)
+        self.caj_btn.clicked.connect(lambda: self.show_tool(3)); side_layout.addWidget(self.caj_btn)
         self.media_btn = QPushButton(); self.media_btn.setObjectName("navButton"); self.media_btn.setCheckable(True)
-        self.media_btn.clicked.connect(lambda: self.show_tool(3)); side_layout.addWidget(self.media_btn)
+        self.media_btn.clicked.connect(lambda: self.show_tool(4)); side_layout.addWidget(self.media_btn)
         side_layout.addStretch()
         self.settings_btn = QPushButton("⚙   设置"); self.settings_btn.clicked.connect(lambda: SettingsDialog(self).exec()); side_layout.addWidget(self.settings_btn)
         self.privacy_label = QLabel(); self.privacy_label.setObjectName("muted"); side_layout.addWidget(self.privacy_label)
@@ -790,8 +890,9 @@ class NiuBToolbox(QMainWindow):
         content_layout.addWidget(toolbar)
         self.compress_panel = ImageCompressorPanel(self)
         self.pdf_panel = PdfToMarkdownPanel(self)
+        self.caj_panel = CajToPdfPanel(self)
         self.media_panel = MediaConverterPanel(self)
-        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.media_panel)
+        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.media_panel)
         body.addWidget(self.tool_stack, 1)
         self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
@@ -801,7 +902,8 @@ class NiuBToolbox(QMainWindow):
         self.active_btn.setChecked(index == 0)
         self.compress_btn.setChecked(index == 1)
         self.pdf_btn.setChecked(index == 2)
-        self.media_btn.setChecked(index == 3)
+        self.caj_btn.setChecked(index == 3)
+        self.media_btn.setChecked(index == 4)
 
     def load_settings(self) -> dict:
         try: return json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -831,6 +933,7 @@ class NiuBToolbox(QMainWindow):
         self.active_btn.setText("✦   " + self.tr("watermark"))
         self.compress_btn.setText("▣   " + self.tr("compress_tool"))
         self.pdf_btn.setText("▤   " + self.tr("pdf_tool"))
+        self.caj_btn.setText("◫   " + self.tr("caj_tool"))
         self.media_btn.setText("▶   " + self.tr("media_tool"))
         self.settings_btn.setText(self.tr("settings"))
         self.privacy_label.setText(self.tr("local_private"))
@@ -857,6 +960,7 @@ class NiuBToolbox(QMainWindow):
         self.pdf_panel.retranslate()
         self.media_panel.retranslate()
         self.compress_panel.retranslate()
+        self.caj_panel.retranslate()
 
     def toggle_theme(self) -> None:
         self.theme = "dark" if self.theme == "light" else "light"
@@ -1110,6 +1214,10 @@ class NiuBToolbox(QMainWindow):
             return
         if self.compress_panel.worker is not None:
             self.compress_panel.status.setText(self.tr("wait_close_compress"))
+            event.ignore()
+            return
+        if self.caj_panel.worker is not None:
+            self.caj_panel.status.setText(self.tr("wait_close_caj"))
             event.ignore()
             return
         super().closeEvent(event)
