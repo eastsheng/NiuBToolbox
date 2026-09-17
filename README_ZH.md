@@ -2,29 +2,35 @@
 
 [English](README.md) | 简体中文
 
-NiuB工具箱是一款轻量、简洁的 Windows 桌面工具软件，将常用的图片处理和文件转换工具集中在一个界面中。
+NiuB工具箱是一款轻量的 Windows 桌面工具软件，集中提供日常图片处理和文件转换能力。软件支持中英文界面、白天与黑夜模式、窗口缩放，并通过后台处理保持界面流畅。
 
-软件可用于 AI 图片修复、常见图片格式压缩与转换、视频和 GIF 相互转换，以及 PDF 转 Markdown。软件支持浅色与深色主题、中英文切换，并通过后台处理保持界面流畅。本地内容均在设备上完成处理。
+所有处理均在本地完成。生成结果只会在点击“保存结果”或“导出图片”并选择保存位置后写入磁盘。
 
 ## 下载
 
-前往项目的 [Releases 页面](https://github.com/eastsheng/NiuBToolbox/releases) 下载最新的 Windows 安装包。
+请前往 [GitHub Releases](https://github.com/eastsheng/NiuBToolbox/releases) 下载最新安装包。
 
-安装包支持 64 位 Windows 10 和 Windows 11。安装完成后，除 AI 修复外的工具无需额外配置即可使用。
+1.0.7 版本支持 64 位 Windows 10 和 Windows 11。
 
 ## 本地 AI 模型
 
-安装包和源码仓库不包含可选的 AI 模型。请下载 OpenCV 官方 LaMa 模型，并将其放入 `models` 文件夹：
+AI 功能使用本地 ONNX 模型。可通过对应工具中的下载按钮获取模型，然后将模型文件直接放入软件的 `models` 文件夹，不要在其中创建子文件夹。
+
+AI 去水印模型：
 
 [下载 inpainting_lama_2025jan.onnx](https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx?download=true)
 
+模型文件名如下：
+
 ```text
-NiuBToolbox/models/inpainting_lama_2025jan.onnx
+models/inpainting_lama_2025jan.onnx
+models/RealESRGAN_x4plus.onnx
+models/modnet_photographic.onnx
 ```
 
 ## 从源码运行
 
-需要 Windows 10/11（64 位）和 Python 3.11。
+需要 64 位 Windows 10/11 和 Python 3.11。
 
 ```powershell
 git clone https://github.com/eastsheng/NiuBToolbox.git
@@ -37,4 +43,4 @@ python qt_app.py
 
 ## 隐私
 
-图片和文件均在本机处理，无需上传。
+图片和文件均保留在本机，NiuB工具箱不会上传这些内容。

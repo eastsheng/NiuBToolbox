@@ -2,24 +2,30 @@
 
 English | [简体中文](README_ZH.md)
 
-NiuB Toolbox is a lightweight Windows desktop utility that brings together practical image processing and file conversion tools in one clean interface.
+NiuB Toolbox is a lightweight Windows desktop application for everyday image processing and file conversion. It provides a clean bilingual interface, light and dark themes, resizable windows, and background processing to keep the application responsive.
 
-It can remove unwanted image content with AI, compress and convert common image formats, convert between video and GIF, and turn PDF files into Markdown. The application supports light and dark themes, Simplified Chinese and English, and background processing for a responsive experience. Local content is processed on your device.
+All processing runs locally. Generated results are written to your chosen location only after you click **Save Result** or **Export**.
 
 ## Download
 
-Download the latest Windows installer from the [Releases page](https://github.com/eastsheng/NiuBToolbox/releases).
+Download the latest installer from the [GitHub Releases page](https://github.com/eastsheng/NiuBToolbox/releases).
 
-The installer supports 64-bit Windows 10 and Windows 11. After installation, tools other than AI repair are ready to use without additional configuration.
+Version 1.0.7 supports 64-bit Windows 10 and Windows 11.
 
-## Local AI Model
+## Local AI Models
 
-The installer and source repository do not include the optional AI model. Download the official OpenCV LaMa model and place it in the `models` folder:
+AI-powered tools use local ONNX models. Use the download button in the corresponding tool, then place the downloaded model file directly in the application's `models` folder. Do not create subfolders inside `models`.
+
+The AI watermark remover uses:
 
 [Download inpainting_lama_2025jan.onnx](https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx?download=true)
 
+The expected model filenames are:
+
 ```text
-NiuBToolbox/models/inpainting_lama_2025jan.onnx
+models/inpainting_lama_2025jan.onnx
+models/RealESRGAN_x4plus.onnx
+models/modnet_photographic.onnx
 ```
 
 ## Run from Source
@@ -37,4 +43,4 @@ You can also double-click `run.bat` after installing the dependencies.
 
 ## Privacy
 
-Images and files are processed locally and do not need to be uploaded.
+Images and files remain on your computer and are not uploaded by NiuB Toolbox.

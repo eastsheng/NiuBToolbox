@@ -64,6 +64,7 @@ class MediaConverter:
         fps: int = 12,
         max_width: int = 720,
         callback: ProgressCallback | None = None,
+        output_dir: str | Path | None = None,
     ) -> Path:
         source = Path(source_path).resolve()
         extension = source.suffix.lower()
@@ -71,7 +72,8 @@ class MediaConverter:
             raise ValueError("Please select a supported video or GIF file.")
 
         to_gif = extension != ".gif"
-        destination = self._unique_output(source, ".gif" if to_gif else ".mp4")
+        output_base = Path(output_dir) / source.name if output_dir else source
+        destination = self._unique_output(output_base, ".gif" if to_gif else ".mp4")
         scale = self._scale_filter(max_width)
         output_fps = self._source_fps(source) if fps <= 0 else float(fps)
         fps_filter = f"fps={output_fps:.3f}"

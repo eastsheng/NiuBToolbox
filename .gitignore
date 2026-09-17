@@ -39,8 +39,9 @@ NiuBToolbox/config.json
 *_markdown/
 *_markdown_*/
 
-# AI models are downloaded separately by users
-models/*.onnx
+# Keep the models directory in Git, but ignore every downloaded model inside it
+models/*
+!models/.gitkeep
 
 # IDE and operating-system metadata
 .idea/

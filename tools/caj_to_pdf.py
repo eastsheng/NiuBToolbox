@@ -20,7 +20,7 @@ class CajToPdfConverter:
             index += 1
         return output
 
-    def convert(self, source_path: str) -> Path:
+    def convert(self, source_path: str, output_dir: str | Path | None = None) -> Path:
         source = Path(source_path).resolve()
         if not source.is_file():
             raise FileNotFoundError(source)
@@ -35,7 +35,7 @@ class CajToPdfConverter:
         if not mutool.is_file():
             raise FileNotFoundError("The MuPDF conversion component was not found.")
 
-        output = self._available_output(source)
+        output = self._available_output(Path(output_dir) / source.name if output_dir else source)
         environment = os.environ.copy()
         environment["PATH"] = str(engine_dir) + os.pathsep + environment.get("PATH", "")
         startupinfo = subprocess.STARTUPINFO()

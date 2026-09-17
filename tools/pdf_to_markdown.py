@@ -65,14 +65,16 @@ class PdfToMarkdownConverter:
                     return markdown, line_end + len(insertion), True
         return markdown, start, False
 
-    def convert(self, pdf_path: str | Path, callback: ProgressCallback | None = None) -> Path:
+    def convert(self, pdf_path: str | Path, callback: ProgressCallback | None = None, output_dir: str | Path | None = None) -> Path:
         source = Path(pdf_path).resolve()
         if not source.is_file() or source.suffix.lower() != ".pdf":
             raise ValueError("Please select a valid PDF file.")
 
         stem = self._safe_stem(source)
-        destination = self._unique_output(source.parent, stem)
-        temp_root = Path(tempfile.mkdtemp(prefix=f".{stem}_markdown_", dir=source.parent))
+        destination_parent = Path(output_dir) if output_dir else source.parent
+        destination_parent.mkdir(parents=True, exist_ok=True)
+        destination = self._unique_output(destination_parent, stem)
+        temp_root = Path(tempfile.mkdtemp(prefix=f".{stem}_markdown_", dir=destination_parent))
         try:
             self._emit(callback, "extracting_text", 10)
             # Calling MarkItDown.convert_local() constructs Magika only to detect

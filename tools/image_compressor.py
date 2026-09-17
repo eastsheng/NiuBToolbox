@@ -27,7 +27,7 @@ class ImageCompressor:
             index += 1
         return candidate
 
-    def compress(self, source_path: str, output_format: str, quality: int) -> tuple[Path, int, int]:
+    def compress(self, source_path: str, output_format: str, quality: int, output_dir: str | Path | None = None) -> tuple[Path, int, int]:
         source = Path(source_path)
         with Image.open(source) as opened:
             source_format = (opened.format or source.suffix.lstrip(".")).upper()
@@ -51,7 +51,8 @@ class ImageCompressor:
             "AVIF": ".avif", "TGA": ".tga", "PPM": ".ppm",
         }
         suffix = source.suffix if output_format.upper() == "ORIGINAL" else suffixes[selected_format]
-        output = self._available_path(source, suffix)
+        output_base = Path(output_dir) / source.name if output_dir else source
+        output = self._available_path(output_base, suffix)
         common = {"icc_profile": icc_profile} if icc_profile else {}
 
         if selected_format == "JPEG":
