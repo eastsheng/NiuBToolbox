@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QIntValidator
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton, QSlider,
-    QStackedWidget, QVBoxLayout, QWidget
+    QStackedWidget, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget
 )
 
 from tools.inpaint_engine import InpaintEngine
@@ -25,12 +25,19 @@ from tools.id_photo_generator import IdPhotoGenerator
 from tools.caj_to_pdf import CajToPdfConverter
 from tools.media_converter import MediaConverter
 from tools.pdf_to_markdown import PdfToMarkdownConverter
+from tools.word_to_pdf import WordToPdfConverter
 
 
 PALETTES = {
     "light": {"window": "#f4f4f6", "card": "#ffffff", "side": "#fafafa", "text": "#252525", "muted": "#898989", "line": "#e6e6e8", "canvas": "#ededf0", "hover": "#f0f0f2", "red": "#ec4141"},
     "dark": {"window": "#171719", "card": "#242426", "side": "#202022", "text": "#f2f2f2", "muted": "#99999f", "line": "#343438", "canvas": "#151517", "hover": "#303034", "red": "#ec4141"},
+    "ocean": {"window": "#eaf3f9", "card": "#f9fcff", "side": "#e3eef6", "text": "#193247", "muted": "#6d8799", "line": "#cbdde9", "canvas": "#dce9f2", "hover": "#d7e9f5", "red": "#3586c7"},
+    "forest": {"window": "#111a15", "card": "#1b2820", "side": "#16221b", "text": "#edf6f0", "muted": "#91a89a", "line": "#304239", "canvas": "#101813", "hover": "#26382e", "red": "#45b979"},
+    "violet": {"window": "#18131f", "card": "#27202f", "side": "#211a29", "text": "#f5effa", "muted": "#a596b2", "line": "#3c3148", "canvas": "#15101b", "hover": "#352a41", "red": "#a66cf2"},
+    "sunset": {"window": "#f8eee7", "card": "#fffaf6", "side": "#f5e7dd", "text": "#3c2b25", "muted": "#947c72", "line": "#ead5c8", "canvas": "#f1e2d8", "hover": "#f3dfd2", "red": "#e76f51"},
 }
+
+DARK_THEMES = {"dark", "forest", "violet"}
 
 APP_VERSION = "1.0.7"
 COPYRIGHT_YEAR = "2026"
@@ -63,10 +70,38 @@ def save_staged_file(parent: QWidget, staged: str, title: str, suggested: str, f
     shutil.copy2(staged, destination)
     return destination
 
+
+class ThemedComboDelegate(QStyledItemDelegate):
+    """Paint combo-box rows consistently instead of relying on the OS hover palette."""
+
+    def __init__(self, theme: str, parent=None) -> None:
+        super().__init__(parent); self.theme = theme
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        colors = PALETTES[self.theme]
+        active = bool(option.state & (QStyle.State_MouseOver | QStyle.State_Selected))
+        painter.save(); painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen); painter.setBrush(QColor(colors["red"] if active else colors["card"]))
+        painter.drawRoundedRect(QRectF(option.rect.adjusted(2, 1, -2, -1)), 6, 6)
+        painter.setPen(QColor("#ffffff" if active else colors["text"]))
+        painter.drawText(option.rect.adjusted(11, 0, -6, 0), Qt.AlignVCenter | Qt.AlignLeft, str(index.data(Qt.DisplayRole) or ""))
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:
+        size = super().sizeHint(option, index); size.setHeight(max(32, size.height())); return size
+
 TEXT = {
     "zh": {
         "app": "NiuB工具箱", "my_tools": "我的工具", "image_processing": "图片处理", "file_processing": "文件处理", "watermark": "AI 去水印",
-        "local_private": "●  本地处理 · 图片不会上传", "settings": "⚙   设置",
+        "settings": "⚙   设置",
+        "theme_setting": "界面主题", "theme_light": "云朵白", "theme_dark": "深夜黑",
+        "theme_ocean": "海盐蓝", "theme_forest": "森林绿", "theme_violet": "紫罗兰", "theme_sunset": "暖阳橙",
+        "tip_theme_dark": "切换到黑夜模式", "tip_theme_light": "切换到白天模式",
+        "tip_minimize": "最小化窗口", "tip_maximize": "最大化窗口", "tip_restore": "还原窗口", "tip_close": "关闭软件",
+        "tip_settings": "打开语言、版本和版权设置", "tip_delete_image": "移除当前图片，不会删除原文件",
+        "tip_choose_image": "从本地选择需要处理的图片", "tip_undo": "撤销上一次涂抹或修复",
+        "tip_clear": "清除当前涂抹的修复选区", "tip_export": "选择位置保存当前图片",
+        "tip_repair": "按照涂抹区域开始去水印修复", "tip_repair_mode": "选择 AI 深度修复或快速修复方式",
         "local_process": "图片全程在本地处理", "delete_image": "删除图片", "choose_image": "选择图片",
         "canvas_hint": "选择图片后，用画笔涂抹需要移除的区域", "brush_size": "画笔大小",
         "repair_mode": "修复方式", "ai_mode": "AI 深度修复（推荐）", "fast_mode": "快速修复",
@@ -144,10 +179,26 @@ TEXT = {
         "caj_filter": "CAJ 文件 (*.caj *.nh *.kdh)", "convert_caj": "开始转换",
         "caj_converting": "正在后台转换…", "caj_done": "转换完成：{name}",
         "caj_failed": "CAJ 转换失败", "wait_close_caj": "CAJ 仍在转换，请完成后再关闭",
+        "word_tool": "Word 转 PDF", "word_title": "Word 转 PDF",
+        "word_subtitle": "自动使用 Word、WPS 或内置引擎导出，保持图片比例",
+        "choose_word": "选择 Word 文件", "no_word": "请选择需要转换的 Word 文档",
+        "word_filter": "Word 文档 (*.docx *.doc)", "word_quality": "PDF 质量",
+        "word_quality_high": "高质量（图片清晰，文件较大）", "word_quality_small": "较小文件（适合分享）",
+        "convert_word": "开始转换", "word_converting": "正在后台转换…",
+        "word_requires_office": "未安装 Word/WPS 时，DOCX 将自动使用内置引擎转换；旧版 DOC 仍需办公软件",
+        "word_failed": "Word 转 PDF 失败", "wait_close_word": "Word 文档仍在转换，请完成后再关闭",
     },
     "en": {
         "app": "NiuB Toolbox", "my_tools": "My Tools", "image_processing": "Image Processing", "file_processing": "File Processing", "watermark": "AI Watermark Remover",
-        "local_private": "●  Local processing · Nothing is uploaded", "settings": "⚙   Settings",
+        "settings": "⚙   Settings",
+        "theme_setting": "Interface Theme", "theme_light": "Cloud White", "theme_dark": "Midnight Black",
+        "theme_ocean": "Ocean Blue", "theme_forest": "Forest Green", "theme_violet": "Violet", "theme_sunset": "Warm Sunset",
+        "tip_theme_dark": "Switch to dark mode", "tip_theme_light": "Switch to light mode",
+        "tip_minimize": "Minimize window", "tip_maximize": "Maximize window", "tip_restore": "Restore window", "tip_close": "Close application",
+        "tip_settings": "Open language, version, and copyright settings", "tip_delete_image": "Remove the current image without deleting the source file",
+        "tip_choose_image": "Choose an image from this device", "tip_undo": "Undo the last selection or repair",
+        "tip_clear": "Clear the painted repair selection", "tip_export": "Choose where to save the current image",
+        "tip_repair": "Repair the painted area and remove its contents", "tip_repair_mode": "Choose AI deep repair or quick repair",
         "local_process": "Images are processed entirely on this device", "delete_image": "Remove Image", "choose_image": "Choose Image",
         "canvas_hint": "Choose an image, then paint over the area to remove", "brush_size": "Brush Size",
         "repair_mode": "Repair Mode", "ai_mode": "AI Deep Repair (Recommended)", "fast_mode": "Quick Repair",
@@ -225,6 +276,14 @@ TEXT = {
         "caj_filter": "CAJ Files (*.caj *.nh *.kdh)", "convert_caj": "Convert",
         "caj_converting": "Converting in the background…", "caj_done": "Conversion complete: {name}",
         "caj_failed": "CAJ Conversion Failed", "wait_close_caj": "CAJ conversion is still running. Please wait before closing.",
+        "word_tool": "Word to PDF", "word_title": "Word to PDF",
+        "word_subtitle": "Automatically export with Word, WPS, or the built-in engine while preserving image proportions",
+        "choose_word": "Choose Word File", "no_word": "Choose a Word document to convert",
+        "word_filter": "Word Documents (*.docx *.doc)", "word_quality": "PDF Quality",
+        "word_quality_high": "High quality (clearer images, larger file)", "word_quality_small": "Smaller file (easy to share)",
+        "convert_word": "Convert", "word_converting": "Converting in the background…",
+        "word_requires_office": "DOCX uses the built-in engine when Word/WPS is unavailable; legacy DOC still requires office software",
+        "word_failed": "Word to PDF Failed", "wait_close_word": "Word conversion is still running. Please wait before closing.",
     },
 }
 
@@ -258,6 +317,9 @@ def window_control_icon(kind: str, color: str) -> QIcon:
             painter.drawLine(4, 12, 14, 12)
         elif kind == "maximize":
             painter.drawRoundedRect(QRectF(4, 4, 10, 10), 1, 1)
+        elif kind == "restore":
+            painter.drawRoundedRect(QRectF(3, 6, 9, 9), 1, 1)
+            painter.drawLine(6, 4, 14, 4); painter.drawLine(14, 4, 14, 12)
         elif kind == "close":
             painter.drawLine(5, 5, 13, 13); painter.drawLine(13, 5, 5, 13)
         elif kind == "sun":
@@ -271,7 +333,7 @@ def window_control_icon(kind: str, color: str) -> QIcon:
             painter.fillPath(outer.subtracted(cutout), QColor(icon_color))
         painter.end(); return pixmap
 
-    icon = QIcon(); icon.addPixmap(draw(color), QIcon.Normal); icon.addPixmap(draw("#ffffff"), QIcon.Active)
+    icon = QIcon(); icon.addPixmap(draw(color), QIcon.Normal); icon.addPixmap(draw(color), QIcon.Active)
     return icon
 
 
@@ -1083,6 +1145,110 @@ class CajToPdfPanel(QWidget):
             self.status.setText(self.window.tr("saved").format(name=Path(saved).name)); self.update_actions()
 
 
+class WordConvertWorker(QThread):
+    succeeded = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, source_path: str, quality: str, parent=None) -> None:
+        super().__init__(parent)
+        self.source_path = source_path
+        self.quality = quality
+
+    def run(self) -> None:
+        stage = staged_output_dir()
+        try:
+            output = WordToPdfConverter().convert(self.source_path, stage, self.quality)
+            self.succeeded.emit(str(output))
+        except Exception as exc:
+            shutil.rmtree(stage, ignore_errors=True)
+            self.failed.emit(str(exc))
+
+
+class WordToPdfPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window
+        self.source_path: str | None = None
+        self.output_path: str | None = None
+        self.worker: WordConvertWorker | None = None
+
+        layout = QVBoxLayout(self); layout.setContentsMargins(22, 17, 22, 20); layout.setSpacing(12)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); self.subtitle.setWordWrap(True); layout.addWidget(self.subtitle)
+        card = QFrame(); card.setObjectName("toolbar")
+        card_layout = QVBoxLayout(card); card_layout.setContentsMargins(22, 22, 22, 22); card_layout.setSpacing(14)
+        card_layout.addStretch()
+        self.file_label = QLabel(); self.file_label.setAlignment(Qt.AlignCenter); self.file_label.setWordWrap(True); card_layout.addWidget(self.file_label)
+        quality_row = QHBoxLayout(); quality_row.addStretch()
+        self.quality_label = QLabel(); quality_row.addWidget(self.quality_label)
+        self.quality_combo = QComboBox(); self.quality_combo.setObjectName("repairMode"); self.quality_combo.setMinimumWidth(290); quality_row.addWidget(self.quality_combo)
+        quality_row.addStretch(); card_layout.addLayout(quality_row)
+        self.office_hint = QLabel(); self.office_hint.setObjectName("muted"); self.office_hint.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.office_hint)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_file); buttons.addWidget(self.choose_btn)
+        self.convert_btn = QPushButton(); self.convert_btn.clicked.connect(self.convert_file); buttons.addWidget(self.convert_btn)
+        self.save_btn = QPushButton(); self.save_btn.clicked.connect(self.save_output); buttons.addWidget(self.save_btn)
+        buttons.addStretch(); card_layout.addLayout(buttons)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setTextVisible(False); card_layout.addWidget(self.progress)
+        self.status = QLabel(); self.status.setObjectName("muted"); self.status.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.status)
+        card_layout.addStretch(); layout.addWidget(card, 1)
+        self.retranslate(); self.update_actions()
+
+    def retranslate(self) -> None:
+        t = self.window.tr
+        self.title.setText(t("word_title")); self.subtitle.setText(t("word_subtitle"))
+        self.choose_btn.setText(t("choose_word")); self.convert_btn.setText(t("convert_word")); self.save_btn.setText(t("save_result"))
+        self.quality_label.setText(t("word_quality")); self.office_hint.setText(t("word_requires_office"))
+        selected = self.quality_combo.currentData() or "high"
+        self.quality_combo.clear()
+        self.quality_combo.addItem(t("word_quality_high"), "high")
+        self.quality_combo.addItem(t("word_quality_small"), "small")
+        self.quality_combo.setCurrentIndex(max(0, self.quality_combo.findData(selected)))
+        if self.source_path is None: self.file_label.setText(t("no_word"))
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None
+        self.choose_btn.setEnabled(not busy); self.quality_combo.setEnabled(not busy)
+        self.convert_btn.setEnabled(self.source_path is not None and not busy)
+        self.save_btn.setEnabled(self.output_path is not None and not busy)
+
+    def choose_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("choose_word"), "", self.window.tr("word_filter"))
+        if not path: return
+        discard_staged_output(self.output_path); self.source_path = path; self.output_path = None
+        self.progress.setRange(0, 100); self.progress.setValue(0); self.status.setText("")
+        self.file_label.setText(f"{Path(path).name}\n{path}"); self.update_actions()
+
+    def convert_file(self) -> None:
+        if self.worker is not None or self.source_path is None: return
+        discard_staged_output(self.output_path); self.output_path = None
+        self.progress.setRange(0, 0); self.status.setText(self.window.tr("word_converting"))
+        self.worker = WordConvertWorker(self.source_path, str(self.quality_combo.currentData()), self)
+        self.worker.succeeded.connect(self.on_succeeded); self.worker.failed.connect(self.on_failed)
+        self.worker.finished.connect(self.on_finished); self.worker.start(); self.update_actions()
+
+    def on_succeeded(self, output_path: str) -> None:
+        self.output_path = output_path; self.status.setText(self.window.tr("result_ready"))
+
+    def on_failed(self, message: str) -> None:
+        self.status.setText(self.window.tr("word_failed"))
+        QMessageBox.critical(self, self.window.tr("word_failed"), message)
+
+    def on_finished(self) -> None:
+        self.progress.setRange(0, 100); self.progress.setValue(100 if self.output_path else 0)
+        worker = self.worker; self.worker = None
+        if worker is not None: worker.deleteLater()
+        self.update_actions()
+
+    def save_output(self) -> None:
+        if not self.output_path or not self.source_path: return
+        staged = self.output_path; suggested = str(Path(self.source_path).with_suffix(".pdf"))
+        saved = save_staged_file(self, staged, self.window.tr("save_result_title"), suggested, "PDF (*.pdf)")
+        if saved:
+            discard_staged_output(staged); self.output_path = None
+            self.status.setText(self.window.tr("saved").format(name=Path(saved).name)); self.update_actions()
+
+
 class ImageCanvas(QWidget):
     mask_changed = Signal()
 
@@ -1199,12 +1365,17 @@ class TitleBar(QWidget):
 
     def retranslate(self) -> None:
         self.name_label.setText(self.window.tr("app"))
+        self.update_icons()
 
     def update_icons(self) -> None:
         color = PALETTES[self.window.theme]["text"]
-        self.theme_button.setIcon(window_control_icon("sun" if self.window.theme == "dark" else "moon", color))
+        dark = self.window.theme in DARK_THEMES
+        self.theme_button.setIcon(window_control_icon("sun" if dark else "moon", color))
+        self.theme_button.setToolTip(self.window.tr("tip_theme_light" if dark else "tip_theme_dark"))
         for kind, button in self.control_buttons.items():
-            button.setIcon(window_control_icon(kind, color))
+            actual_kind = "restore" if kind == "maximize" and self.window.isMaximized() else kind
+            button.setIcon(window_control_icon(actual_kind, color))
+            button.setToolTip(self.window.tr("tip_restore" if actual_kind == "restore" else f"tip_{kind}"))
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -1222,7 +1393,7 @@ class SettingsDialog(QDialog):
     def __init__(self, window) -> None:
         super().__init__(window)
         self.window = window
-        self.setFixedSize(440, 300)
+        self.setFixedSize(440, 390)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 22)
         self.language_title = QLabel()
@@ -1235,6 +1406,13 @@ class SettingsDialog(QDialog):
         self.language_combo.setCurrentIndex(max(0, self.language_combo.findData(window.language)))
         self.language_combo.currentIndexChanged.connect(self.change_language)
         layout.addWidget(self.language_combo)
+        layout.addSpacing(10)
+        self.theme_title = QLabel(); self.theme_title.setObjectName("pageTitle"); layout.addWidget(self.theme_title)
+        self.theme_combo = QComboBox(); self.theme_combo.setObjectName("repairMode")
+        for theme_name in PALETTES: self.theme_combo.addItem("", theme_name)
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(window.theme)))
+        self.theme_combo.currentIndexChanged.connect(self.change_theme)
+        layout.addWidget(self.theme_combo)
         layout.addStretch()
         divider = QFrame(); divider.setFrameShape(QFrame.HLine); divider.setObjectName("settingsDivider")
         layout.addWidget(divider)
@@ -1248,10 +1426,20 @@ class SettingsDialog(QDialog):
         self.window.set_language(self.language_combo.currentData())
         self.retranslate()
 
+    def change_theme(self) -> None:
+        self.window.set_theme(str(self.theme_combo.currentData()))
+        self.window._repolish_theme(self)
+
     def retranslate(self) -> None:
         t = self.window.tr
         self.setWindowTitle(t("settings_title"))
         self.language_title.setText(t("language"))
+        self.theme_title.setText(t("theme_setting"))
+        selected_theme = self.theme_combo.currentData()
+        self.theme_combo.blockSignals(True)
+        for index, theme_name in enumerate(PALETTES): self.theme_combo.setItemText(index, t(f"theme_{theme_name}"))
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(selected_theme)))
+        self.theme_combo.blockSignals(False)
         self.about_title.setText(t("about"))
         self.version_label.setText(t("version_info").format(version=APP_VERSION))
         self.copyright_label.setText(t("copyright_info").format(year=COPYRIGHT_YEAR, owner=COPYRIGHT_OWNER))
@@ -1268,6 +1456,8 @@ class NiuBToolbox(QMainWindow):
         self.config_path = config_root / "config.json"
         self.settings = self.load_settings()
         self.theme = self.settings.get("theme", "light")
+        if self.theme not in PALETTES:
+            self.theme = "light"
         self.language = self.settings.get("language", "zh")
         if self.language not in TEXT:
             self.language = "zh"
@@ -1314,11 +1504,12 @@ class NiuBToolbox(QMainWindow):
         self.pdf_btn.clicked.connect(lambda: self.show_tool(4)); side_layout.addWidget(self.pdf_btn)
         self.caj_btn = QPushButton(); self.caj_btn.setObjectName("navButton"); self.caj_btn.setCheckable(True)
         self.caj_btn.clicked.connect(lambda: self.show_tool(5)); side_layout.addWidget(self.caj_btn)
+        self.word_btn = QPushButton(); self.word_btn.setObjectName("navButton"); self.word_btn.setCheckable(True)
+        self.word_btn.clicked.connect(lambda: self.show_tool(6)); side_layout.addWidget(self.word_btn)
         self.media_btn = QPushButton(); self.media_btn.setObjectName("navButton"); self.media_btn.setCheckable(True)
-        self.media_btn.clicked.connect(lambda: self.show_tool(6)); side_layout.addWidget(self.media_btn)
+        self.media_btn.clicked.connect(lambda: self.show_tool(7)); side_layout.addWidget(self.media_btn)
         side_layout.addStretch()
         self.settings_btn = QPushButton("⚙   设置"); self.settings_btn.clicked.connect(lambda: SettingsDialog(self).exec()); side_layout.addWidget(self.settings_btn)
-        self.privacy_label = QLabel(); self.privacy_label.setObjectName("muted"); side_layout.addWidget(self.privacy_label)
         body.addWidget(side)
 
         content = QWidget(); content_layout = QVBoxLayout(content); content_layout.setContentsMargins(22, 17, 22, 20); content_layout.setSpacing(10)
@@ -1345,8 +1536,9 @@ class NiuBToolbox(QMainWindow):
         self.id_photo_panel = IdPhotoPanel(self)
         self.pdf_panel = PdfToMarkdownPanel(self)
         self.caj_panel = CajToPdfPanel(self)
+        self.word_panel = WordToPdfPanel(self)
         self.media_panel = MediaConverterPanel(self)
-        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.enhance_panel); self.tool_stack.addWidget(self.id_photo_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.media_panel)
+        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.enhance_panel); self.tool_stack.addWidget(self.id_photo_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.word_panel); self.tool_stack.addWidget(self.media_panel)
         body.addWidget(self.tool_stack, 1)
         self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
@@ -1359,7 +1551,8 @@ class NiuBToolbox(QMainWindow):
         self.id_photo_btn.setChecked(index == 3)
         self.pdf_btn.setChecked(index == 4)
         self.caj_btn.setChecked(index == 5)
-        self.media_btn.setChecked(index == 6)
+        self.word_btn.setChecked(index == 6)
+        self.media_btn.setChecked(index == 7)
         if self.styleSheet():
             self._repolish_theme(self.tool_stack.currentWidget())
         self.update_nav_icons()
@@ -1368,7 +1561,7 @@ class NiuBToolbox(QMainWindow):
         colors = PALETTES[self.theme]
         buttons = (
             (self.active_btn, "✦"), (self.compress_btn, "▣"), (self.enhance_btn, "◈"), (self.id_photo_btn, "●"),
-            (self.pdf_btn, "▤"), (self.caj_btn, "◫"), (self.media_btn, "▶"),
+            (self.pdf_btn, "▤"), (self.caj_btn, "◫"), (self.word_btn, "W"), (self.media_btn, "▶"),
         )
         for button, symbol in buttons:
             button.setIcon(symbol_icon(symbol, colors["red"] if button.isChecked() else colors["text"]))
@@ -1405,13 +1598,16 @@ class NiuBToolbox(QMainWindow):
         self.id_photo_btn.setText(self.tr("id_photo_tool"))
         self.pdf_btn.setText(self.tr("pdf_tool"))
         self.caj_btn.setText(self.tr("caj_tool"))
+        self.word_btn.setText(self.tr("word_tool"))
         self.media_btn.setText(self.tr("media_tool"))
         self.settings_btn.setText(self.tr("settings"))
-        self.privacy_label.setText(self.tr("local_private"))
+        self.settings_btn.setToolTip(self.tr("tip_settings"))
         self.page_title.setText(self.tr("watermark"))
         self.subtitle.setText(self.tr("local_process"))
         self.delete_image_btn.setText(self.tr("delete_image"))
+        self.delete_image_btn.setToolTip(self.tr("tip_delete_image"))
         self.choose_btn.setText(self.tr("choose_image"))
+        self.choose_btn.setToolTip(self.tr("tip_choose_image"))
         self.canvas.hint = self.tr("canvas_hint")
         self.canvas.update()
         self.brush_label.setText(self.tr("brush_size"))
@@ -1422,6 +1618,7 @@ class NiuBToolbox(QMainWindow):
         self.mode.addItems((self.tr("ai_mode"), self.tr("fast_mode")))
         self.mode.setCurrentIndex(max(0, selected_mode))
         self.mode.blockSignals(False)
+        self.mode.setToolTip(self.tr("tip_repair_mode"))
         self.watermark_model_title.setText(self.tr("watermark_model"))
         self.watermark_model_btn.setText(self.tr("add_model"))
         self.watermark_model_reset_btn.setText(self.tr("reset_model"))
@@ -1429,9 +1626,13 @@ class NiuBToolbox(QMainWindow):
         self.watermark_model_label.setToolTip(self.tr("model_hint"))
         self.update_watermark_model_label()
         self.undo_btn.setText(self.tr("undo"))
+        self.undo_btn.setToolTip(self.tr("tip_undo"))
         self.clear_btn.setText(self.tr("clear"))
+        self.clear_btn.setToolTip(self.tr("tip_clear"))
         self.export_btn.setText(self.tr("export"))
+        self.export_btn.setToolTip(self.tr("tip_export"))
         self.repair_btn.setText(self.tr("start_repair"))
+        self.repair_btn.setToolTip(self.tr("tip_repair"))
         if self.image is None:
             self.status.setText(self.tr("choose_prompt"))
         self.pdf_panel.retranslate()
@@ -1440,10 +1641,18 @@ class NiuBToolbox(QMainWindow):
         self.enhance_panel.retranslate()
         self.id_photo_panel.retranslate()
         self.caj_panel.retranslate()
+        self.word_panel.retranslate()
 
     def toggle_theme(self) -> None:
-        self.theme = "dark" if self.theme == "light" else "light"
-        self.settings["theme"] = self.theme; self.save_settings(); self.apply_theme()
+        self.set_theme("light" if self.theme in DARK_THEMES else "dark")
+
+    def set_theme(self, theme: str) -> None:
+        if theme not in PALETTES or theme == self.theme:
+            return
+        self.theme = theme
+        self.settings["theme"] = theme
+        self.save_settings()
+        self.apply_theme()
 
     def apply_theme(self) -> None:
         p = PALETTES[self.theme]
@@ -1461,6 +1670,7 @@ class NiuBToolbox(QMainWindow):
         palette.setColor(QPalette.Highlight, QColor(p["red"]))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         self.setPalette(palette)
+        QApplication.instance().setPalette(palette)
         self.setProperty("theme", self.theme)
         self.titlebar.update_icons()
         first_install = not self.styleSheet()
@@ -1479,6 +1689,7 @@ class NiuBToolbox(QMainWindow):
                     QPushButton{themed}:hover {{ background:{colors['hover']}; }}
                     QPushButton{themed}:disabled {{ color:{colors['muted']}; }}
                     #primary{themed} {{ background:{colors['red']}; color:white; }}
+                    #primary{themed}:hover {{ background:{colors['red']}; color:white; }}
                     QPushButton#navButton{themed}:checked {{ background:{colors['hover']}; color:{colors['red']}; }}
                     #closeButton{themed}:hover {{ background:{colors['red']}; color:white; }}
                     #toolbar{themed} {{ background:{colors['card']}; border-color:{colors['line']}; }}
@@ -1488,6 +1699,9 @@ class NiuBToolbox(QMainWindow):
                     QComboBox#repairMode{themed}:hover {{ background:{colors['hover']}; }}
                     QComboBox#repairMode{themed}:focus {{ border-color:{colors['red']}; }}
                     QComboBox#repairMode{themed} QAbstractItemView {{ background:{colors['card']}; color:{colors['text']}; border-color:{colors['line']}; selection-background-color:{colors['red']}; }}
+                    QComboBox#repairMode{themed} QAbstractItemView::item {{ background:{colors['card']}; color:{colors['text']}; }}
+                    QComboBox#repairMode{themed} QAbstractItemView::item:hover,
+                    QComboBox#repairMode{themed} QAbstractItemView::item:selected {{ background:{colors['red']}; color:white; }}
                     QProgressBar{themed} {{ background:{colors['hover']}; }}
                     QProgressBar{themed}::chunk {{ background:{colors['red']}; }}
                     QDialog{themed} {{ background:{colors['window']}; }}
@@ -1520,6 +1734,7 @@ class NiuBToolbox(QMainWindow):
             QProgressBar {{ background:palette(button); border:0; border-radius:4px; min-height:8px; max-height:8px; }}
             QProgressBar::chunk {{ background:palette(highlight); border-radius:4px; }}
             QDialog {{ background:palette(window); }}
+            QToolTip {{ background:palette(base); color:palette(text); border:1px solid palette(mid); border-radius:5px; padding:5px 8px; }}
             {color_rules}
         """)
         self._repolish_theme(self.titlebar, self.sidebar, self.tool_stack.currentWidget())
@@ -1536,12 +1751,31 @@ class NiuBToolbox(QMainWindow):
             if identity in seen: continue
             seen.add(identity)
             widget.setProperty("theme", self.theme)
+            if isinstance(widget, QComboBox):
+                colors = PALETTES[self.theme]
+                view = widget.view()
+                view_palette = view.palette()
+                view_palette.setColor(QPalette.Base, QColor(colors["card"]))
+                view_palette.setColor(QPalette.Text, QColor(colors["text"]))
+                view_palette.setColor(QPalette.Highlight, QColor(colors["red"]))
+                view_palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+                view.setPalette(view_palette)
+                view.setMouseTracking(True)
+                delegate = ThemedComboDelegate(self.theme, view)
+                view.setItemDelegate(delegate)
+                view._niub_theme_delegate = delegate
+                view.setStyleSheet(f"""
+                    QListView {{ background:{colors['card']}; color:{colors['text']}; border:1px solid {colors['line']}; outline:0; padding:5px; }}
+                    QListView::item {{ background:{colors['card']}; color:{colors['text']}; min-height:30px; padding-left:9px; border:0; border-radius:6px; }}
+                    QListView::item:hover, QListView::item:selected {{ background:{colors['red']}; color:#ffffff; }}
+                """)
             widget.style().unpolish(widget)
             widget.style().polish(widget)
             QWidget.update(widget)
 
     def toggle_maximize(self) -> None:
         self.showNormal() if self.isMaximized() else self.showMaximized()
+        self.titlebar.update_icons()
 
     def _resize_edges(self, global_position) -> Qt.Edges:
         if self.isMaximized():
@@ -1791,7 +2025,11 @@ class NiuBToolbox(QMainWindow):
             self.caj_panel.status.setText(self.tr("wait_close_caj"))
             event.ignore()
             return
-        for panel in (self.pdf_panel, self.media_panel, self.compress_panel, self.enhance_panel, self.id_photo_panel, self.caj_panel):
+        if self.word_panel.worker is not None:
+            self.word_panel.status.setText(self.tr("wait_close_word"))
+            event.ignore()
+            return
+        for panel in (self.pdf_panel, self.media_panel, self.compress_panel, self.enhance_panel, self.id_photo_panel, self.caj_panel, self.word_panel):
             discard_staged_output(panel.output_path)
             panel.output_path = None
         super().closeEvent(event)
