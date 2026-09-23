@@ -14,7 +14,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, QThread, Qt, QU
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
-    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPushButton, QSlider,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QSlider,
     QStackedWidget, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget
 )
 
@@ -26,6 +26,7 @@ from tools.caj_to_pdf import CajToPdfConverter
 from tools.media_converter import MediaConverter
 from tools.pdf_to_markdown import PdfToMarkdownConverter
 from tools.word_to_pdf import WordToPdfConverter
+from tools.image_to_dxf import ImageToDxfConverter
 
 
 PALETTES = {
@@ -173,6 +174,16 @@ TEXT = {
         "generate_id_photo": "生成证件照", "generating_id_photo": "正在后台抠取人像并生成证件照…",
         "id_photo_done": "证件照已生成：{name}", "id_photo_failed": "证件照生成失败",
         "wait_close_id_photo": "证件照仍在生成，请完成后再关闭",
+        "dxf_tool": "图片转 DXF", "dxf_title": "图片转 DXF",
+        "dxf_subtitle": "提取图片轮廓并转换为可编辑的毫米单位 DXF 矢量线条",
+        "choose_dxf_image": "选择图片", "no_dxf_image": "请选择需要矢量化的图片",
+        "dxf_mode": "提取方式", "dxf_outline": "边缘轮廓（照片 / 线稿）", "dxf_silhouette": "黑白剪影（标志 / 图形）",
+        "dxf_detail": "轮廓细节", "dxf_width": "输出宽度（毫米）",
+        "dxf_detail_hint": "数值越高，保留的轮廓节点越多", "dxf_width_hint": "DXF 图形的实际宽度，范围 1–10000 毫米",
+        "convert_dxf": "开始转换", "dxf_converting": "正在后台提取矢量轮廓…",
+        "dxf_done": "已生成 {count} 条轮廓，请点击“保存结果”", "dxf_failed": "图片转 DXF 失败",
+        "dxf_preview_empty": "转换完成后在这里预览 DXF 轮廓",
+        "wait_close_dxf": "DXF 仍在生成，请完成后再关闭",
         "caj_tool": "CAJ 转 PDF", "caj_title": "CAJ 转 PDF",
         "caj_subtitle": "在本地将 CAJ、NH 或 KDH 文献文件转换为 PDF",
         "choose_caj": "选择 CAJ 文件", "no_caj": "请选择需要转换的 CAJ 文件",
@@ -270,6 +281,16 @@ TEXT = {
         "generate_id_photo": "Generate ID Photo", "generating_id_photo": "Extracting portrait and creating ID photo in the background…",
         "id_photo_done": "ID photo created: {name}", "id_photo_failed": "ID Photo Generation Failed",
         "wait_close_id_photo": "The ID photo is still being generated. Please wait before closing.",
+        "dxf_tool": "Image to DXF", "dxf_title": "Image to DXF",
+        "dxf_subtitle": "Extract image contours as editable DXF vector lines in millimetres",
+        "choose_dxf_image": "Choose Image", "no_dxf_image": "Choose an image to vectorize",
+        "dxf_mode": "Extraction Mode", "dxf_outline": "Edge contours (photo / line art)", "dxf_silhouette": "B/W silhouette (logo / shape)",
+        "dxf_detail": "Contour Detail", "dxf_width": "Output Width (mm)",
+        "dxf_detail_hint": "Higher values preserve more contour vertices", "dxf_width_hint": "Actual DXF width from 1 to 10000 millimetres",
+        "convert_dxf": "Convert", "dxf_converting": "Extracting vector contours in the background…",
+        "dxf_done": "Generated {count} contours. Click “Save Result”", "dxf_failed": "Image to DXF Failed",
+        "dxf_preview_empty": "The DXF contour preview will appear here after conversion",
+        "wait_close_dxf": "DXF generation is still running. Please wait before closing.",
         "caj_tool": "CAJ to PDF", "caj_title": "CAJ to PDF",
         "caj_subtitle": "Convert CAJ, NH, or KDH document files to PDF locally",
         "choose_caj": "Choose CAJ File", "no_caj": "Choose a CAJ file to convert",
@@ -740,6 +761,158 @@ class ImageCompressorPanel(QWidget):
         staged = self.output_path; suggested = str(Path(self.source_path).with_name(Path(staged).name))
         suffix = Path(staged).suffix; file_filter = f"{suffix.upper().lstrip('.')} (*{suffix});;All Files (*.*)"
         saved = save_staged_file(self, staged, self.window.tr("save_result_title"), suggested, file_filter)
+        if saved:
+            discard_staged_output(staged); self.output_path = None
+            self.status.setText(self.window.tr("saved").format(name=Path(saved).name)); self.update_actions()
+
+
+class DxfPreviewWidget(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("imageCanvas"); self.setMinimumHeight(210)
+        self.polylines: list[list[tuple[float, float]]] = []
+        self.bounds: tuple[float, float, float, float] | None = None
+        self.hint = ""
+
+    def clear_preview(self) -> None:
+        self.polylines = []; self.bounds = None; self.update()
+
+    def load_dxf(self, path: str) -> None:
+        self.polylines = ImageToDxfConverter.read_polylines(path)
+        self.bounds = ImageToDxfConverter.read_bounds(path); self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing, True)
+        frame_rect = QRectF(self.rect()).adjusted(0.75, 0.75, -0.75, -0.75)
+        painter.setPen(QPen(self.palette().color(QPalette.Mid), 1.2))
+        painter.setBrush(self.palette().color(QPalette.Button))
+        painter.drawRoundedRect(frame_rect, 10, 10)
+        if not self.polylines:
+            painter.setPen(self.palette().color(QPalette.PlaceholderText))
+            painter.drawText(self.rect().adjusted(20, 20, -20, -20), Qt.AlignCenter | Qt.TextWordWrap, self.hint)
+            return
+        points = [point for polyline in self.polylines for point in polyline]
+        if self.bounds:
+            min_x, max_x, min_y, max_y = self.bounds
+        else:
+            min_x = min(point[0] for point in points); max_x = max(point[0] for point in points)
+            min_y = min(point[1] for point in points); max_y = max(point[1] for point in points)
+        margin = 28.0; span_x = max(0.001, max_x - min_x); span_y = max(0.001, max_y - min_y)
+        scale = min(max(1.0, self.width() - margin * 2) / span_x, max(1.0, self.height() - margin * 2) / span_y)
+        draw_width = span_x * scale; draw_height = span_y * scale
+        offset_x = (self.width() - draw_width) / 2; offset_y = (self.height() - draw_height) / 2
+        painter.setPen(QPen(QColor("#111111"), 1.5)); painter.setBrush(QColor("#ffffff"))
+        painter.drawRect(QRectF(offset_x, offset_y, draw_width, draw_height))
+        pen = QPen(self.palette().color(QPalette.Highlight), 1.5); pen.setCosmetic(True); painter.setPen(pen); painter.setBrush(Qt.NoBrush)
+        for polyline in self.polylines:
+            if len(polyline) < 2: continue
+            path = QPainterPath()
+            first_x, first_y = polyline[0]; path.moveTo(offset_x + (first_x - min_x) * scale, offset_y + (max_y - first_y) * scale)
+            for x, y in polyline[1:]: path.lineTo(offset_x + (x - min_x) * scale, offset_y + (max_y - y) * scale)
+            path.closeSubpath(); painter.drawPath(path)
+
+
+class ImageToDxfWorker(QThread):
+    succeeded = Signal(str, int)
+    failed = Signal(str)
+
+    def __init__(self, source_path: str, mode: str, detail: int, width_mm: float, parent=None) -> None:
+        super().__init__(parent)
+        self.source_path = source_path; self.mode = mode; self.detail = detail; self.width_mm = width_mm
+
+    def run(self) -> None:
+        stage = staged_output_dir()
+        try:
+            output, count = ImageToDxfConverter().convert(self.source_path, stage, self.mode, self.detail, self.width_mm)
+            self.succeeded.emit(str(output), count)
+        except Exception as exc:
+            shutil.rmtree(stage, ignore_errors=True)
+            self.failed.emit(str(exc))
+
+
+class ImageToDxfPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__()
+        self.window = window; self.source_path: str | None = None; self.output_path: str | None = None
+        self.worker: ImageToDxfWorker | None = None
+        layout = QVBoxLayout(self); layout.setContentsMargins(22, 17, 22, 20); layout.setSpacing(12)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); self.subtitle.setWordWrap(True); layout.addWidget(self.subtitle)
+        card = QFrame(); card.setObjectName("toolbar")
+        card_layout = QVBoxLayout(card); card_layout.setContentsMargins(22, 22, 22, 22); card_layout.setSpacing(14); card_layout.addStretch()
+        self.file_label = QLabel(); self.file_label.setAlignment(Qt.AlignCenter); self.file_label.setWordWrap(True); card_layout.addWidget(self.file_label)
+        self.preview = DxfPreviewWidget(); card_layout.addWidget(self.preview, 1)
+        options = QHBoxLayout(); options.addStretch()
+        self.mode_label = QLabel(); options.addWidget(self.mode_label)
+        self.mode_combo = QComboBox(); self.mode_combo.setObjectName("repairMode"); self.mode_combo.setMinimumWidth(230); options.addWidget(self.mode_combo)
+        options.addSpacing(12); self.width_label = QLabel(); options.addWidget(self.width_label)
+        self.width_input = QLineEdit("100"); self.width_input.setObjectName("numberInput"); self.width_input.setValidator(QIntValidator(1, 10000, self.width_input)); self.width_input.setFixedWidth(140)
+        options.addWidget(self.width_input); options.addStretch(); card_layout.addLayout(options)
+        detail_row = QHBoxLayout(); detail_row.addStretch(); self.detail_label = QLabel(); detail_row.addWidget(self.detail_label)
+        self.detail_slider = QSlider(Qt.Horizontal); self.detail_slider.setRange(1, 100); self.detail_slider.setValue(70); self.detail_slider.setFixedWidth(240); detail_row.addWidget(self.detail_slider)
+        self.detail_value = QLabel("70%"); self.detail_value.setFixedWidth(42); detail_row.addWidget(self.detail_value); detail_row.addStretch(); card_layout.addLayout(detail_row)
+        self.detail_slider.valueChanged.connect(lambda value: self.detail_value.setText(f"{value}%"))
+        buttons = QHBoxLayout(); buttons.addStretch()
+        self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_image); buttons.addWidget(self.choose_btn)
+        self.convert_btn = QPushButton(); self.convert_btn.clicked.connect(self.convert_image); buttons.addWidget(self.convert_btn)
+        self.save_btn = QPushButton(); self.save_btn.clicked.connect(self.save_output); buttons.addWidget(self.save_btn)
+        buttons.addStretch(); card_layout.addLayout(buttons)
+        self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setTextVisible(False); card_layout.addWidget(self.progress)
+        self.status = QLabel(); self.status.setObjectName("muted"); self.status.setAlignment(Qt.AlignCenter); card_layout.addWidget(self.status)
+        card_layout.addStretch(); layout.addWidget(card, 1)
+        self.retranslate(); self.update_actions()
+
+    def retranslate(self) -> None:
+        t = self.window.tr; selected = self.mode_combo.currentData() or "outline"
+        self.title.setText(t("dxf_title")); self.subtitle.setText(t("dxf_subtitle")); self.mode_label.setText(t("dxf_mode"))
+        self.mode_combo.clear(); self.mode_combo.addItem(t("dxf_outline"), "outline"); self.mode_combo.addItem(t("dxf_silhouette"), "silhouette")
+        self.mode_combo.setCurrentIndex(max(0, self.mode_combo.findData(selected)))
+        self.detail_label.setText(t("dxf_detail")); self.width_label.setText(t("dxf_width"))
+        self.detail_slider.setToolTip(t("dxf_detail_hint")); self.width_input.setToolTip(t("dxf_width_hint"))
+        self.choose_btn.setText(t("choose_dxf_image")); self.convert_btn.setText(t("convert_dxf")); self.save_btn.setText(t("save_result"))
+        self.preview.hint = t("dxf_preview_empty"); self.preview.update()
+        if self.source_path is None: self.file_label.setText(t("no_dxf_image"))
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None
+        for widget in (self.choose_btn, self.mode_combo, self.detail_slider, self.width_input): widget.setEnabled(not busy)
+        self.convert_btn.setEnabled(self.source_path is not None and not busy); self.save_btn.setEnabled(self.output_path is not None and not busy)
+
+    def choose_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("choose_dxf_image"), "", self.window.tr("image_filter"))
+        if not path: return
+        try:
+            with Image.open(path) as image: dimensions = f"{image.width}×{image.height}"
+        except Exception as exc:
+            QMessageBox.critical(self, self.window.tr("open_failed"), str(exc)); return
+        discard_staged_output(self.output_path); self.source_path = path; self.output_path = None
+        self.preview.clear_preview(); self.file_label.setText(f"{Path(path).name}\n{dimensions}"); self.progress.setValue(0); self.status.setText(""); self.update_actions()
+
+    def convert_image(self) -> None:
+        if self.worker is not None or self.source_path is None: return
+        width = max(1, min(10000, int(self.width_input.text() or "100"))); self.width_input.setText(str(width))
+        discard_staged_output(self.output_path); self.output_path = None; self.preview.clear_preview(); self.progress.setRange(0, 0); self.status.setText(self.window.tr("dxf_converting"))
+        self.worker = ImageToDxfWorker(self.source_path, str(self.mode_combo.currentData()), self.detail_slider.value(), width, self)
+        self.worker.succeeded.connect(self.on_succeeded); self.worker.failed.connect(self.on_failed); self.worker.finished.connect(self.on_finished)
+        self.worker.start(); self.update_actions()
+
+    def on_succeeded(self, output_path: str, count: int) -> None:
+        self.output_path = output_path; self.preview.load_dxf(output_path)
+        self.status.setText(self.window.tr("dxf_done").format(count=count))
+
+    def on_failed(self, message: str) -> None:
+        self.status.setText(self.window.tr("dxf_failed")); QMessageBox.critical(self, self.window.tr("dxf_failed"), message)
+
+    def on_finished(self) -> None:
+        self.progress.setRange(0, 100); self.progress.setValue(100 if self.output_path else 0)
+        worker = self.worker; self.worker = None
+        if worker is not None: worker.deleteLater()
+        self.update_actions()
+
+    def save_output(self) -> None:
+        if not self.output_path or not self.source_path: return
+        staged = self.output_path; suggested = str(Path(self.source_path).with_suffix(".dxf"))
+        saved = save_staged_file(self, staged, self.window.tr("save_result_title"), suggested, "DXF (*.dxf)")
         if saved:
             discard_staged_output(staged); self.output_path = None
             self.status.setText(self.window.tr("saved").format(name=Path(saved).name)); self.update_actions()
@@ -1498,6 +1671,8 @@ class NiuBToolbox(QMainWindow):
         self.enhance_btn.clicked.connect(lambda: self.show_tool(2)); side_layout.addWidget(self.enhance_btn)
         self.id_photo_btn = QPushButton(); self.id_photo_btn.setObjectName("navButton"); self.id_photo_btn.setCheckable(True)
         self.id_photo_btn.clicked.connect(lambda: self.show_tool(3)); side_layout.addWidget(self.id_photo_btn)
+        self.dxf_btn = QPushButton(); self.dxf_btn.setObjectName("navButton"); self.dxf_btn.setCheckable(True)
+        self.dxf_btn.clicked.connect(lambda: self.show_tool(8)); side_layout.addWidget(self.dxf_btn)
         side_layout.addSpacing(12)
         self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); side_layout.addWidget(self.file_tools_label)
         self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
@@ -1538,7 +1713,8 @@ class NiuBToolbox(QMainWindow):
         self.caj_panel = CajToPdfPanel(self)
         self.word_panel = WordToPdfPanel(self)
         self.media_panel = MediaConverterPanel(self)
-        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.enhance_panel); self.tool_stack.addWidget(self.id_photo_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.word_panel); self.tool_stack.addWidget(self.media_panel)
+        self.dxf_panel = ImageToDxfPanel(self)
+        self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.enhance_panel); self.tool_stack.addWidget(self.id_photo_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.word_panel); self.tool_stack.addWidget(self.media_panel); self.tool_stack.addWidget(self.dxf_panel)
         body.addWidget(self.tool_stack, 1)
         self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
@@ -1549,6 +1725,7 @@ class NiuBToolbox(QMainWindow):
         self.compress_btn.setChecked(index == 1)
         self.enhance_btn.setChecked(index == 2)
         self.id_photo_btn.setChecked(index == 3)
+        self.dxf_btn.setChecked(index == 8)
         self.pdf_btn.setChecked(index == 4)
         self.caj_btn.setChecked(index == 5)
         self.word_btn.setChecked(index == 6)
@@ -1560,7 +1737,7 @@ class NiuBToolbox(QMainWindow):
     def update_nav_icons(self) -> None:
         colors = PALETTES[self.theme]
         buttons = (
-            (self.active_btn, "✦"), (self.compress_btn, "▣"), (self.enhance_btn, "◈"), (self.id_photo_btn, "●"),
+            (self.active_btn, "✦"), (self.compress_btn, "▣"), (self.enhance_btn, "◈"), (self.id_photo_btn, "●"), (self.dxf_btn, "⌁"),
             (self.pdf_btn, "▤"), (self.caj_btn, "◫"), (self.word_btn, "W"), (self.media_btn, "▶"),
         )
         for button, symbol in buttons:
@@ -1596,6 +1773,7 @@ class NiuBToolbox(QMainWindow):
         self.compress_btn.setText(self.tr("compress_tool"))
         self.enhance_btn.setText(self.tr("enhance_tool"))
         self.id_photo_btn.setText(self.tr("id_photo_tool"))
+        self.dxf_btn.setText(self.tr("dxf_tool"))
         self.pdf_btn.setText(self.tr("pdf_tool"))
         self.caj_btn.setText(self.tr("caj_tool"))
         self.word_btn.setText(self.tr("word_tool"))
@@ -1642,6 +1820,7 @@ class NiuBToolbox(QMainWindow):
         self.id_photo_panel.retranslate()
         self.caj_panel.retranslate()
         self.word_panel.retranslate()
+        self.dxf_panel.retranslate()
 
     def toggle_theme(self) -> None:
         self.set_theme("light" if self.theme in DARK_THEMES else "dark")
@@ -1731,6 +1910,9 @@ class NiuBToolbox(QMainWindow):
             QComboBox#repairMode::down-arrow {{ image:url({arrow_path}); width:12px; height:8px; }}
             QComboBox#repairMode QAbstractItemView {{ background:palette(base); color:palette(text); border:1px solid palette(mid); border-radius:9px; padding:5px; outline:0; selection-background-color:palette(highlight); selection-color:white; }}
             QComboBox#repairMode QAbstractItemView::item {{ min-height:30px; padding-left:9px; border-radius:6px; }}
+            QLineEdit#numberInput {{ background:palette(base); border:1px solid palette(mid); border-radius:9px; padding:6px 12px; min-height:20px; }}
+            QLineEdit#numberInput:hover {{ border-color:#b8b8bd; background:palette(button); }}
+            QLineEdit#numberInput:focus {{ border-color:palette(highlight); }}
             QProgressBar {{ background:palette(button); border:0; border-radius:4px; min-height:8px; max-height:8px; }}
             QProgressBar::chunk {{ background:palette(highlight); border-radius:4px; }}
             QDialog {{ background:palette(window); }}
@@ -2029,7 +2211,11 @@ class NiuBToolbox(QMainWindow):
             self.word_panel.status.setText(self.tr("wait_close_word"))
             event.ignore()
             return
-        for panel in (self.pdf_panel, self.media_panel, self.compress_panel, self.enhance_panel, self.id_photo_panel, self.caj_panel, self.word_panel):
+        if self.dxf_panel.worker is not None:
+            self.dxf_panel.status.setText(self.tr("wait_close_dxf"))
+            event.ignore()
+            return
+        for panel in (self.pdf_panel, self.media_panel, self.compress_panel, self.enhance_panel, self.id_photo_panel, self.caj_panel, self.word_panel, self.dxf_panel):
             discard_staged_output(panel.output_path)
             panel.output_path = None
         super().closeEvent(event)
