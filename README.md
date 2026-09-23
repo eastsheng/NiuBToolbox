@@ -10,7 +10,7 @@ All processing runs locally. Generated results are written to your chosen locati
 
 Download the latest installer from the [GitHub Releases page](https://github.com/eastsheng/NiuBToolbox/releases).
 
-Version 1.0.7 supports 64-bit Windows 10 and Windows 11.
+Version 1.0.8 supports 64-bit Windows 10 and Windows 11.
 
 ## Local AI Models
 

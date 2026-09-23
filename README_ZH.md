@@ -10,7 +10,7 @@ NiuB工具箱是一款轻量的 Windows 桌面工具软件，集中提供日常�
 
 请前往 [GitHub Releases](https://github.com/eastsheng/NiuBToolbox/releases) 下载最新安装包。
 
-1.0.7 版本支持 64 位 Windows 10 和 Windows 11。
+1.0.8 版本支持 64 位 Windows 10 和 Windows 11。
 
 ## 本地 AI 模型
 
