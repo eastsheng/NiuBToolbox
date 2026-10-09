@@ -141,7 +141,8 @@ def value_to_pixel(value: tuple[float, float], roi: tuple[int, int, int, int],
 def detect_points(rgb: np.ndarray, roi: tuple[int, int, int, int],
                   sample: tuple[int, int], mode: str = "points",
                   tolerance: int = 30, marker_size: int = 7,
-                  curve_step: int = 5) -> list[tuple[float, float]]:
+                  curve_step: int = 5,
+                  plot_axes: dict[str, float] | None = None) -> list[tuple[float, float]]:
     height, width = rgb.shape[:2]
     left, top, right, bottom = roi
     if not (0 <= left < right <= width and 0 <= top < bottom <= height):
@@ -150,11 +151,18 @@ def detect_points(rgb: np.ndarray, roi: tuple[int, int, int, int],
     if not (left <= sx < right and top <= sy < bottom):
         raise ValueError("Choose a series color inside the plot area.")
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
-    target = lab[sy, sx].astype(np.int16)
-    crop = lab[top:bottom, left:right].astype(np.int16)
-    distance = np.sqrt(np.sum((crop - target) ** 2, axis=2, dtype=np.int32))
+    target = lab[sy, sx].astype(np.int32)
+    crop = lab[top:bottom, left:right].astype(np.int32)
+    delta = crop - target
+    distance = np.sqrt(np.sum(delta * delta, axis=2, dtype=np.int32))
     mask = np.asarray(distance <= max(5, min(100, tolerance)), dtype=np.uint8) * 255
     if mode == "points":
+        plot_left, plot_top, plot_right, plot_bottom = left, top, right, bottom
+        if plot_axes:
+            plot_left = max(left, round(plot_axes["xmin"] + 5))
+            plot_right = min(right, round(plot_axes["xmax"] - 5))
+            plot_top = max(top, round(plot_axes["ymax"] + 5))
+            plot_bottom = min(bottom, round(plot_axes["ymin"] - 5))
         radius = max(1, marker_size // 3)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
         cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -169,20 +177,65 @@ def detect_points(rgb: np.ndarray, roi: tuple[int, int, int, int],
             if x <= 0 or y <= 0 or x + w >= right - left or y + h >= bottom - top:
                 continue
             cx, cy = centers[label]
-            result.append((float(left + cx), float(top + cy)))
+            image_x, image_y = float(left + cx), float(top + cy)
+            if not (plot_left <= image_x < plot_right and plot_top <= image_y < plot_bottom):
+                continue
+            if plot_axes and image_x > plot_left + .55 * (plot_right - plot_left) and image_y < plot_top + .32 * (plot_bottom - plot_top):
+                mid_x, mid_y = round(cx), round(cy)
+                nearby = mask[max(0, mid_y - 2):min(mask.shape[0], mid_y + 3),
+                              max(0, mid_x - 30):min(mask.shape[1], mid_x + 31)]
+                columns = np.flatnonzero(np.any(nearby > 0, axis=0))
+                text_area = rgb[max(0, round(image_y) - 12):min(height, round(image_y) + 13),
+                                min(width, round(image_x) + 25):min(width, round(image_x) + 145)]
+                dark_text = int(np.count_nonzero(cv2.cvtColor(text_area, cv2.COLOR_RGB2GRAY) < 120)) if text_area.size else 0
+                if (len(columns) and columns[-1] - columns[0] > marker_size * 4) or dark_text > 80:
+                    continue  # colored legend swatch plus its horizontal line
+            result.append((image_x, image_y))
         return sorted(result)
     if mode == "curve":
+        # Thin anti-aliased line pixels are much lighter than filled markers.
+        curve_threshold = 150 if target[0] < 80 else 100
+        curve_mask = np.asarray(distance <= max(curve_threshold, tolerance), dtype=np.uint8)
+        if plot_axes:
+            plot_left = max(0, min(curve_mask.shape[1], round(plot_axes["xmin"] - left + 10)))
+            plot_right = max(0, min(curve_mask.shape[1], round(plot_axes["xmax"] - left - 4)))
+            plot_top = max(0, min(curve_mask.shape[0], round(plot_axes["ymax"] - top + 4)))
+            plot_bottom = max(0, min(curve_mask.shape[0], round(plot_axes["ymin"] - top - 4)))
+            if plot_right > plot_left and plot_bottom > plot_top:
+                curve_mask[:plot_top] = 0; curve_mask[plot_bottom:] = 0
+                curve_mask[:, :plot_left] = 0; curve_mask[:, plot_right:] = 0
+        seed_x, seed_y = sx - left, sy - top
+        if not (0 <= seed_x < curve_mask.shape[1] and 0 <= seed_y < curve_mask.shape[0]):
+            return []
+        if not curve_mask[seed_y, seed_x]:
+            nearby = np.argwhere(curve_mask[max(0, seed_y - 5):seed_y + 6,
+                                            max(0, seed_x - 5):seed_x + 6])
+            if not len(nearby): return []
+            seed_x += int(nearby[0, 1]) - min(5, seed_x)
+            seed_y += int(nearby[0, 0]) - min(5, seed_y)
+        traced = [(seed_x, float(seed_y))]
+        for direction in (-1, 1):
+            y = float(seed_y); gap = 0; branch = []
+            for x in range(seed_x + direction, curve_mask.shape[1] if direction > 0 else -1, direction):
+                rows = np.flatnonzero(curve_mask[:, x])
+                if len(rows):
+                    closest = int(rows[np.argmin(abs(rows - y))])
+                    if abs(closest - y) <= max(18, min(26, gap * 1.5 + 9)):
+                        if gap:
+                            previous_x, previous_y = branch[-1] if branch else traced[0]
+                            for missing_x in range(previous_x + direction, x, direction):
+                                fraction = abs(missing_x - previous_x) / abs(x - previous_x)
+                                branch.append((missing_x, previous_y + fraction * (closest - previous_y)))
+                        y = float(closest); gap = 0; branch.append((x, y)); continue
+                gap += 1
+                if gap > 45: break
+            traced.extend(branch)
+        traced.sort()
+        if len(traced) < 8 or traced[-1][0] - traced[0][0] < 20:
+            return []
         result = []
         step = max(2, curve_step)
-        for x in range(0, mask.shape[1], step):
-            stripe = mask[:, x:min(x + step, mask.shape[1])]
-            pixels = np.argwhere(stripe > 0)
-            if len(pixels) < 2 or len(pixels) > stripe.size * 0.45:
-                continue
-            rows = pixels[:, 0]
-            if np.ptp(rows) > max(12, marker_size * 3):
-                continue
-            result.append((float(left + x + (stripe.shape[1] - 1) / 2), float(top + np.median(rows))))
+        for x, y in traced[::step]: result.append((float(left + x), float(top + y)))
         return result
     raise ValueError("Unsupported plot mode.")
 
