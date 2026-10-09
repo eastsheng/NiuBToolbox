@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import os
 import shutil
 import sys
@@ -10,12 +11,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, QThread, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtCore import QEvent, QItemSelectionModel, QPoint, QRect, QRectF, QSize, QThread, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QDoubleValidator, QIcon, QImage, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPalette, QPen, QPixmap, QPolygon
 from PySide6.QtWidgets import (
-    QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton, QSlider,
-    QStackedWidget, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget
+    QAbstractItemView, QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
+    QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QSlider,
+    QStackedWidget, QStyle, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 )
 
 from tools.inpaint_engine import InpaintEngine
@@ -27,6 +28,7 @@ from tools.media_converter import MediaConverter
 from tools.pdf_to_markdown import PdfToMarkdownConverter
 from tools.word_to_pdf import WordToPdfConverter
 from tools.image_to_dxf import ImageToDxfConverter
+from tools.chart_digitizer import detect_axes, detect_axis_ticks, detect_points, load_rgb, pixel_to_value, value_to_pixel, write_csv
 
 
 PALETTES = {
@@ -184,6 +186,25 @@ TEXT = {
         "dxf_done": "已生成 {count} 条轮廓，请点击“保存结果”", "dxf_failed": "图片转 DXF 失败",
         "dxf_preview_empty": "转换完成后在这里预览 DXF 轮廓",
         "wait_close_dxf": "DXF 仍在生成，请完成后再关闭",
+        "digitizer_tool": "图表数据提取", "digitizer_title": "论文图表数据提取",
+        "digitizer_subtitle": "自动定位坐标轴两端向内的第二个刻度；确认位置并填写对应数值",
+        "digitizer_choose": "选择图表图片", "digitizer_empty": "选择图片后开始标定",
+        "digitizer_color": "点取曲线颜色", "digitizer_detect": "自动提取",
+        "digitizer_points": "散点", "digitizer_curve": "曲线", "digitizer_mode": "图表类型",
+        "digitizer_xmin": "X 最小", "digitizer_xmax": "X 最大", "digitizer_ymin": "Y 最小", "digitizer_ymax": "Y 最大",
+        "digitizer_xlog": "X 对数", "digitizer_ylog": "Y 对数", "digitizer_save": "保存 CSV 与核对图",
+        "digitizer_hint": "刻度数字手动填写；图上选点按 Del 删除，预览表可 Ctrl+A 全选、Del 删除，右键编辑。",
+        "digitizer_preview": "实时数据预览", "digitizer_delete": "删除选中点",
+        "digitizer_edit": "编辑点坐标", "digitizer_edit_bounds": "坐标超出图片范围，请检查输入值。",
+        "digitizer_axes_found": "已选中各轴两端向内的第二个刻度；请核对位置并填写四个刻度值。",
+        "digitizer_axes_missing": "未可靠定位坐标轴，请点击四个刻度按钮手动标定。",
+        "digitizer_values_missing": "部分刻度线未可靠检出，请点击缺失的刻度按钮手动标定，并填写数值。",
+        "digitizer_anchor_hint": "请在原图上点击 {label} 对应的刻度中心。",
+        "digitizer_need_calibration": "请依次点击四个刻度标定按钮，并在图上选择对应刻度中心。",
+        "digitizer_pick_color": "请在图中点击一条彩色曲线或数据点。",
+        "digitizer_count": "识别到 {count} 个点，可在图上调整。", "digitizer_none": "未找到数据点，请更换颜色、模式或图片。",
+        "digitizer_selected": "所选点：X={x:.6g}，Y={y:.6g}（像素 {px:.0f}, {py:.0f}）",
+        "digitizer_error": "图表数据提取失败", "digitizer_saved": "已保存 CSV 和核对图：{name}",
         "caj_tool": "CAJ 转 PDF", "caj_title": "CAJ 转 PDF",
         "caj_subtitle": "在本地将 CAJ、NH 或 KDH 文献文件转换为 PDF",
         "choose_caj": "选择 CAJ 文件", "no_caj": "请选择需要转换的 CAJ 文件",
@@ -291,6 +312,25 @@ TEXT = {
         "dxf_done": "Generated {count} contours. Click “Save Result”", "dxf_failed": "Image to DXF Failed",
         "dxf_preview_empty": "The DXF contour preview will appear here after conversion",
         "wait_close_dxf": "DXF generation is still running. Please wait before closing.",
+        "digitizer_tool": "Chart Digitizer", "digitizer_title": "Paper Chart Digitizer",
+        "digitizer_subtitle": "Automatically select the second tick inward from each axis end; verify positions and enter values",
+        "digitizer_choose": "Choose Chart Image", "digitizer_empty": "Choose an image to begin",
+        "digitizer_color": "Pick Series Color", "digitizer_detect": "Auto Detect",
+        "digitizer_points": "Scatter", "digitizer_curve": "Curve", "digitizer_mode": "Chart Type",
+        "digitizer_xmin": "X Min", "digitizer_xmax": "X Max", "digitizer_ymin": "Y Min", "digitizer_ymax": "Y Max",
+        "digitizer_xlog": "Log X", "digitizer_ylog": "Log Y", "digitizer_save": "Save CSV and Overlay",
+        "digitizer_hint": "Enter tick values manually. Select a point on the image and press Del; use Ctrl+A and Del in the preview, or right-click to edit.",
+        "digitizer_preview": "Live Data Preview", "digitizer_delete": "Delete Selected Point",
+        "digitizer_edit": "Edit Point Coordinates", "digitizer_edit_bounds": "Coordinates are outside the image. Check the entered values.",
+        "digitizer_axes_found": "Selected the second tick inward from each axis end. Verify positions and enter four tick values.",
+        "digitizer_axes_missing": "Could not locate axes reliably. Use the four tick buttons to calibrate manually.",
+        "digitizer_values_missing": "Some tick marks were not located reliably. Mark the missing ticks manually and enter their values.",
+        "digitizer_anchor_hint": "Click the center of the {label} tick on the original image.",
+        "digitizer_need_calibration": "Click each of the four tick buttons, then mark its position on the image.",
+        "digitizer_pick_color": "Click a series color in the image.",
+        "digitizer_count": "Found {count} points. You can adjust them on the image.", "digitizer_none": "No data points found. Try another color, mode, or image.",
+        "digitizer_selected": "Selected: X={x:.6g}, Y={y:.6g} (pixel {px:.0f}, {py:.0f})",
+        "digitizer_error": "Chart Digitizer Failed", "digitizer_saved": "Saved CSV and overlay: {name}",
         "caj_tool": "CAJ to PDF", "caj_title": "CAJ to PDF",
         "caj_subtitle": "Convert CAJ, NH, or KDH document files to PDF locally",
         "choose_caj": "Choose CAJ File", "no_caj": "Choose a CAJ file to convert",
@@ -764,6 +804,523 @@ class ImageCompressorPanel(QWidget):
         if saved:
             discard_staged_output(staged); self.output_path = None
             self.status.setText(self.window.tr("saved").format(name=Path(saved).name)); self.update_actions()
+
+
+class ChartCanvas(QWidget):
+    changed = Signal()
+    sampled = Signal()
+    pointContextRequested = Signal(object)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setMinimumHeight(220); self.setObjectName("imageCanvas")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.rgb: np.ndarray | None = None
+        self.pixmap = QPixmap()
+        self.roi: tuple[int, int, int, int] | None = None
+        self.sample: tuple[int, int] | None = None
+        self.points: list[tuple[float, float]] = []
+        self.calibration: dict[str, float] = {}
+        self.axis_origin: tuple[float, float] | None = None
+        self.mode = "edit"; self.drag_index: int | None = None
+        self.selected_index: int | None = None
+        self.selected_indices: set[int] = set()
+        self.drag_anchor: str | None = None
+        self.selected_anchor: str | None = None
+        self.hint = ""
+
+    def load(self, path: str) -> None:
+        self.rgb = load_rgb(path)
+        height, width = self.rgb.shape[:2]
+        self.pixmap = QPixmap.fromImage(QImage(self.rgb.data, width, height, width * 3, QImage.Format_RGB888).copy())
+        self.roi = (0, 0, width, height); self.sample = None; self.points = []; self.calibration = {}; self.axis_origin = None
+        self.selected_index = None; self.selected_indices.clear(); self.selected_anchor = None; self.update(); self.changed.emit()
+
+    def image_rect(self) -> QRectF:
+        if self.pixmap.isNull(): return QRectF()
+        scale = min((self.width() - 24) / self.pixmap.width(), (self.height() - 24) / self.pixmap.height())
+        width = self.pixmap.width() * scale; height = self.pixmap.height() * scale
+        return QRectF((self.width() - width) / 2, (self.height() - height) / 2, width, height)
+
+    def to_pixel(self, position) -> tuple[int, int] | None:
+        rect = self.image_rect()
+        if not rect.contains(position): return None
+        return (max(0, min(self.pixmap.width() - 1, int((position.x() - rect.x()) * self.pixmap.width() / rect.width()))),
+                max(0, min(self.pixmap.height() - 1, int((position.y() - rect.y()) * self.pixmap.height() / rect.height()))))
+
+    def to_pixel_float(self, position) -> tuple[float, float]:
+        rect = self.image_rect()
+        return ((position.x() - rect.x()) * self.pixmap.width() / rect.width(),
+                (position.y() - rect.y()) * self.pixmap.height() / rect.height())
+
+    def to_screen(self, point: tuple[float, float]) -> QPoint:
+        rect = self.image_rect()
+        return QPoint(round(rect.left() + point[0] * rect.width() / self.pixmap.width()),
+                      round(rect.top() + point[1] * rect.height() / self.pixmap.height()))
+
+    def nearest(self, position) -> int | None:
+        for index, point in enumerate(self.points):
+            screen = self.to_screen(point)
+            if (screen.x() - position.x()) ** 2 + (screen.y() - position.y()) ** 2 < 110:
+                return index
+        return None
+
+    def inside_roi(self, point: tuple[int, int]) -> bool:
+        return bool(self.roi and self.roi[0] <= point[0] < self.roi[2] and self.roi[1] <= point[1] < self.roi[3])
+
+    def delete_selected(self) -> bool:
+        indices = self.selected_indices or ({self.selected_index} if self.selected_index is not None else set())
+        indices = {index for index in indices if 0 <= index < len(self.points)}
+        if not indices: return False
+        for index in sorted(indices, reverse=True): self.points.pop(index)
+        self.selected_index = None; self.selected_indices.clear(); self.update(); self.changed.emit()
+        return True
+
+    def anchor_screen(self, name: str) -> QPoint:
+        assert self.roi is not None
+        left, top, right, bottom = self.roi
+        axis_x, axis_y = self.axis_origin or (left, bottom - 1)
+        return self.to_screen((self.calibration[name], axis_y) if name.startswith("x") else (axis_x, self.calibration[name]))
+
+    def nearest_anchor(self, position) -> str | None:
+        if not self.roi: return None
+        nearby = []
+        for name in ("xmin", "xmax", "ymin", "ymax"):
+            if name not in self.calibration: continue
+            screen = self.anchor_screen(name)
+            distance = (screen.x() - position.x()) ** 2 + (screen.y() - position.y()) ** 2
+            if distance < 144: nearby.append((distance, name))
+        if not nearby: return None
+        nearby.sort()
+        # Repeated clicks cycle through overlapping X/Y markers.
+        if self.selected_anchor in (name for _, name in nearby) and len(nearby) > 1:
+            index = next(i for i, (_, name) in enumerate(nearby) if name == self.selected_anchor)
+            return nearby[(index + 1) % len(nearby)][1]
+        return nearby[0][1]
+
+    def mousePressEvent(self, event) -> None:
+        pixel = self.to_pixel(event.position())
+        if pixel is None: return
+        if event.button() == Qt.RightButton:
+            index = self.nearest(event.position())
+            if index is not None:
+                self.selected_index = index; self.selected_indices = {index}; self.selected_anchor = None
+                self.update(); self.changed.emit(); self.pointContextRequested.emit(event.globalPosition().toPoint())
+            return
+        if event.button() != Qt.LeftButton: return
+        if self.mode.startswith("anchor:"):
+            name = self.mode.partition(":")[2]
+            precise = self.to_pixel_float(event.position())
+            self.calibration[name] = precise[0] if name.startswith("x") else precise[1]
+            self.selected_anchor = name; self.selected_index = None; self.selected_indices.clear(); self.mode = "edit"
+            self.setFocus(); self.update(); self.changed.emit()
+        elif self.mode == "color" and self.inside_roi(pixel):
+            self.sample = pixel; self.mode = "edit"; self.update(); self.sampled.emit()
+        elif self.mode == "edit":
+            self.drag_anchor = self.nearest_anchor(event.position())
+            self.drag_index = None if self.drag_anchor else self.nearest(event.position())
+            self.selected_anchor = self.drag_anchor; self.selected_index = self.drag_index
+            self.selected_indices = {self.drag_index} if self.drag_index is not None else set()
+            self.setFocus(); self.update(); self.changed.emit()
+
+    def mouseMoveEvent(self, event) -> None:
+        pixel = self.to_pixel(event.position())
+        if pixel is None: return
+        if self.drag_anchor is not None:
+            precise = self.to_pixel_float(event.position())
+            self.calibration[self.drag_anchor] = precise[0] if self.drag_anchor.startswith("x") else precise[1]
+            self.update(); self.changed.emit()
+        elif self.drag_index is not None and self.inside_roi(pixel):
+            self.points[self.drag_index] = tuple(map(float, pixel)); self.update(); self.changed.emit()
+
+    def mouseReleaseEvent(self, event) -> None:
+        self.drag_index = None
+        self.drag_anchor = None
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        pixel = self.to_pixel(event.position())
+        if pixel and self.inside_roi(pixel):
+            self.points.append(tuple(map(float, pixel))); self.selected_index = len(self.points) - 1
+            self.selected_indices = {self.selected_index}
+            self.setFocus(); self.update(); self.changed.emit()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and self.delete_selected(): return
+        movement = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}.get(event.key())
+        if self.selected_anchor and movement:
+            name = self.selected_anchor
+            change = movement[0] if name.startswith("x") else movement[1]
+            maximum = self.pixmap.width() - 1 if name.startswith("x") else self.pixmap.height() - 1
+            self.calibration[name] = float(max(0, min(maximum, self.calibration[name] + change)))
+            self.update(); self.changed.emit(); return
+        if self.selected_index is None or self.selected_index >= len(self.points):
+            super().keyPressEvent(event); return
+        if movement is None:
+            super().keyPressEvent(event); return
+        x, y = self.points[self.selected_index]
+        target = (int(x + movement[0]), int(y + movement[1]))
+        if self.inside_roi(target):
+            self.points[self.selected_index] = tuple(map(float, target)); self.update(); self.changed.emit()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self); painter.setRenderHint(QPainter.Antialiasing, True)
+        if self.pixmap.isNull():
+            painter.setPen(self.palette().color(QPalette.PlaceholderText)); painter.drawText(self.rect(), Qt.AlignCenter, self.hint); return
+        painter.drawPixmap(self.image_rect().toRect(), self.pixmap)
+        for name in self.calibration:
+            center = self.anchor_screen(name)
+            is_x = name.startswith("x")
+            color = QColor("#2587ef" if is_x else "#f0a52a")
+            color.setAlpha(175 if name != self.selected_anchor else 230)
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 2 if name == self.selected_anchor else 1.5))
+            painter.setBrush(color)
+            if is_x:
+                painter.drawEllipse(center, 8, 8)
+            else:
+                painter.drawPolygon(QPolygon([QPoint(center.x(), center.y() - 6), QPoint(center.x() + 6, center.y()),
+                                              QPoint(center.x(), center.y() + 6), QPoint(center.x() - 6, center.y())]))
+            label = name.replace("min", "1").replace("max", "2").upper()
+            label_x = center.x() + 11 if is_x else center.x() - 31
+            label_y = center.y() - 16 if is_x else center.y() + 8
+            badge = QRect(label_x - 3, label_y - 11, 27, 17)
+            painter.setPen(Qt.NoPen); painter.setBrush(QColor(20, 24, 30, 195))
+            painter.drawRoundedRect(badge, 5, 5)
+            painter.setPen(QColor("#83c0ff" if is_x else "#ffd27e"))
+            painter.drawText(badge, Qt.AlignCenter, label)
+        if self.sample:
+            painter.setPen(QPen(QColor("#ffffff"), 2)); painter.setBrush(QColor("#2baa76")); painter.drawEllipse(self.to_screen(self.sample), 6, 6)
+        painter.setPen(QPen(QColor("#ffffff"), 2)); painter.setBrush(QColor("#ec4141"))
+        for index, point in enumerate(self.points):
+            if index in self.selected_indices or index == self.selected_index:
+                painter.setPen(QPen(QColor("#111111"), 2)); painter.setBrush(QColor("#ffcf4a"))
+            else:
+                painter.setPen(QPen(QColor("#ffffff"), 2)); painter.setBrush(QColor("#ec4141"))
+            painter.drawEllipse(self.to_screen(point), 5, 5)
+
+
+class ChartDetectWorker(QThread):
+    succeeded = Signal(list)
+    failed = Signal(str)
+
+    def __init__(self, rgb, roi, sample, mode, parent=None) -> None:
+        super().__init__(parent); self.rgb = rgb; self.roi = roi; self.sample = sample; self.mode = mode
+
+    def run(self) -> None:
+        try: self.succeeded.emit(detect_points(self.rgb, self.roi, self.sample, self.mode))
+        except Exception as exc: self.failed.emit(str(exc))
+
+
+class AxisDetectWorker(QThread):
+    succeeded = Signal(object, object, object)
+
+    def __init__(self, rgb, parent=None) -> None:
+        super().__init__(parent); self.rgb = rgb.copy()
+
+    def run(self) -> None:
+        axes = detect_axes(self.rgb)
+        ticks = detect_axis_ticks(self.rgb, axes) if axes else {}
+        self.succeeded.emit(axes, ticks,
+                            (axes["xmin"], axes["ymin"]) if axes else None)
+
+
+class PointPreviewTable(QTableWidget):
+    deleteRequested = Signal()
+    editRequested = Signal()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self.deleteRequested.emit(); event.accept(); return
+        if event.key() in (Qt.Key_F2, Qt.Key_Return, Qt.Key_Enter):
+            self.editRequested.emit(); event.accept(); return
+        super().keyPressEvent(event)
+
+
+class ChartDigitizerPanel(QWidget):
+    def __init__(self, window) -> None:
+        super().__init__(); self.window = window; self.source_path: str | None = None; self.worker: ChartDetectWorker | None = None
+        self.axis_worker: AxisDetectWorker | None = None
+        layout = QVBoxLayout(self); layout.setContentsMargins(22, 17, 22, 20); layout.setSpacing(10)
+        self.title = QLabel(); self.title.setObjectName("pageTitle"); layout.addWidget(self.title)
+        self.subtitle = QLabel(); self.subtitle.setObjectName("muted"); self.subtitle.setWordWrap(True); layout.addWidget(self.subtitle)
+        self.canvas = ChartCanvas(); self.canvas.changed.connect(self.update_actions); self.canvas.sampled.connect(self.update_actions); layout.addWidget(self.canvas, 1)
+        self.canvas.pointContextRequested.connect(self.show_canvas_point_menu)
+        self.canvas.changed.connect(self.update_point_status)
+        self.preview_timer = QTimer(self); self.preview_timer.setSingleShot(True); self.preview_timer.setInterval(70)
+        self.preview_timer.timeout.connect(self.refresh_preview)
+        self.canvas.changed.connect(self.preview_timer.start)
+        preview_bar = QHBoxLayout(); self.preview_label = QLabel(); self.preview_label.setObjectName("muted"); preview_bar.addWidget(self.preview_label)
+        preview_bar.addStretch(); self.delete_btn = QPushButton(); self.delete_btn.clicked.connect(self.delete_selected); preview_bar.addWidget(self.delete_btn)
+        layout.addLayout(preview_bar)
+        self.preview_table = PointPreviewTable(0, 2); self.preview_table.setFixedHeight(118)
+        self.preview_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.preview_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.preview_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.preview_table.verticalHeader().setVisible(False)
+        self.preview_table.horizontalHeader().setStretchLastSection(True)
+        self.preview_table.itemSelectionChanged.connect(self.sync_preview_selection)
+        self.preview_table.deleteRequested.connect(self.delete_selected)
+        self.preview_table.editRequested.connect(self.edit_selected)
+        self.preview_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.preview_table.customContextMenuRequested.connect(self.show_preview_menu)
+        layout.addWidget(self.preview_table)
+        card = QFrame(); card.setObjectName("toolbar"); controls = QVBoxLayout(card); controls.setContentsMargins(12, 10, 12, 10); controls.setSpacing(7)
+        axis_row = QHBoxLayout(); self.fields = {}
+        for name in ("xmin", "xmax", "ymin", "ymax"):
+            label = QLabel(); axis_row.addWidget(label); field = QLineEdit(); field.setObjectName("numberInput")
+            field.setValidator(QDoubleValidator(field)); field.setFixedWidth(72); axis_row.addWidget(field); self.fields[name] = (label, field)
+            field.textChanged.connect(lambda _text: self.preview_timer.start())
+            field.textChanged.connect(lambda _text: self.update_actions())
+        self.x_log = QPushButton(); self.x_log.setCheckable(True); axis_row.addWidget(self.x_log)
+        self.y_log = QPushButton(); self.y_log.setCheckable(True); axis_row.addWidget(self.y_log)
+        self.x_log.toggled.connect(lambda _checked: self.preview_timer.start())
+        self.y_log.toggled.connect(lambda _checked: self.preview_timer.start())
+        self.x_log.toggled.connect(lambda _checked: self.update_actions())
+        self.y_log.toggled.connect(lambda _checked: self.update_actions())
+        controls.addLayout(axis_row)
+        anchor_row = QHBoxLayout(); self.anchor_buttons = {}
+        for name in ("xmin", "xmax", "ymin", "ymax"):
+            button = QPushButton(); button.clicked.connect(lambda _checked=False, key=name: self.pick_anchor(key))
+            anchor_row.addWidget(button); self.anchor_buttons[name] = button
+        controls.addLayout(anchor_row)
+        buttons = QHBoxLayout(); self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_image); buttons.addWidget(self.choose_btn)
+        self.color_btn = QPushButton(); self.color_btn.clicked.connect(self.pick_color); buttons.addWidget(self.color_btn)
+        self.mode_label = QLabel(); buttons.addWidget(self.mode_label)
+        self.mode_combo = QComboBox(); self.mode_combo.setObjectName("repairMode"); buttons.addWidget(self.mode_combo)
+        self.detect_btn = QPushButton(); self.detect_btn.clicked.connect(self.detect); buttons.addWidget(self.detect_btn)
+        self.save_btn = QPushButton(); self.save_btn.clicked.connect(self.save_result); buttons.addWidget(self.save_btn)
+        controls.addLayout(buttons)
+        self.hint = QLabel(); self.hint.setObjectName("muted"); controls.addWidget(self.hint)
+        self.status = QLabel(); self.status.setObjectName("muted"); controls.addWidget(self.status)
+        layout.addWidget(card); self.retranslate(); self.update_actions()
+
+    def retranslate(self) -> None:
+        t = self.window.tr; mode = self.mode_combo.currentData() or "points"
+        self.title.setText(t("digitizer_title")); self.subtitle.setText(t("digitizer_subtitle")); self.canvas.hint = t("digitizer_empty")
+        for name, (label, _) in self.fields.items(): label.setText(t("digitizer_" + name))
+        for name, button in self.anchor_buttons.items():
+            label = t("digitizer_" + name)
+            button.setText("⌖  " + label)
+            button.setToolTip(t("digitizer_anchor_hint").format(label=label))
+        self.x_log.setText(t("digitizer_xlog")); self.y_log.setText(t("digitizer_ylog"))
+        self.choose_btn.setText(t("digitizer_choose")); self.color_btn.setText(t("digitizer_color"))
+        self.preview_label.setText(t("digitizer_preview")); self.delete_btn.setText(t("digitizer_delete"))
+        self.preview_table.setHorizontalHeaderLabels(("X", "Y"))
+        self.mode_label.setText(t("digitizer_mode")); self.mode_combo.clear()
+        self.mode_combo.addItem(t("digitizer_points"), "points"); self.mode_combo.addItem(t("digitizer_curve"), "curve")
+        self.mode_combo.setCurrentIndex(max(0, self.mode_combo.findData(mode)))
+        self.detect_btn.setText(t("digitizer_detect")); self.save_btn.setText(t("digitizer_save")); self.hint.setText(t("digitizer_hint"))
+        self.canvas.update(); self.refresh_preview()
+
+    def update_actions(self) -> None:
+        busy = self.worker is not None or self.axis_worker is not None; loaded = self.canvas.rgb is not None
+        self.choose_btn.setEnabled(not busy); self.color_btn.setEnabled(loaded and not busy)
+        for name, button in self.anchor_buttons.items():
+            button.setEnabled(bool(self.canvas.roi) and not busy)
+            button.setText(("✓  " if name in self.canvas.calibration else "⌖  ") + self.window.tr("digitizer_" + name))
+        try: self.limits(); calibrated = True
+        except (ValueError, KeyError): calibrated = False
+        self.detect_btn.setEnabled(bool(self.canvas.sample and self.canvas.roi and calibrated) and not busy)
+        self.save_btn.setEnabled(bool(self.canvas.points and self.canvas.roi and calibrated) and not busy)
+        self.delete_btn.setEnabled(bool(self.canvas.selected_indices) and not busy)
+
+    def refresh_preview(self) -> None:
+        points = sorted(enumerate(self.canvas.points), key=lambda item: item[1][0])
+        try:
+            limits = self.limits(); calibrated = True
+        except (ValueError, KeyError):
+            calibrated = False
+        table = self.preview_table
+        table.blockSignals(True); table.setUpdatesEnabled(False)
+        table.setRowCount(len(points))
+        selected_rows = []
+        for row, (index, point) in enumerate(points):
+            if calibrated:
+                try:
+                    x, y = pixel_to_value(point, self.canvas.roi, limits, self.x_log.isChecked(), self.y_log.isChecked(), self.canvas.calibration)
+                    values = (f"{x:.8g}", f"{y:.8g}")
+                except ValueError:
+                    values = ("—", "—")
+            else:
+                values = ("—", "—")
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value); item.setData(Qt.UserRole, index)
+                table.setItem(row, column, item)
+            if index in self.canvas.selected_indices: selected_rows.append(row)
+        table.clearSelection()
+        for row in selected_rows:
+            table.selectionModel().select(table.model().index(row, 0), QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        table.setUpdatesEnabled(True); table.blockSignals(False)
+        self.preview_label.setText(f"{self.window.tr('digitizer_preview')} · {len(points)}")
+        self.update_actions()
+
+    def sync_preview_selection(self) -> None:
+        indices = {int(self.preview_table.item(row.row(), 0).data(Qt.UserRole))
+                   for row in self.preview_table.selectionModel().selectedRows()
+                   if self.preview_table.item(row.row(), 0) is not None}
+        self.canvas.selected_indices = indices
+        self.canvas.selected_index = next(iter(indices), None)
+        self.canvas.selected_anchor = None
+        self.canvas.update(); self.update_actions(); self.update_point_status()
+
+    def delete_selected(self) -> None:
+        self.canvas.delete_selected()
+
+    def show_preview_menu(self, position: QPoint) -> None:
+        row = self.preview_table.rowAt(position.y())
+        if row < 0: return
+        if row not in {index.row() for index in self.preview_table.selectionModel().selectedRows()}:
+            self.preview_table.selectRow(row)
+        self.show_point_menu(self.preview_table.viewport().mapToGlobal(position))
+
+    def show_canvas_point_menu(self, position: QPoint) -> None:
+        self.show_point_menu(position)
+
+    def show_point_menu(self, position: QPoint) -> None:
+        if not self.canvas.selected_indices: return
+        menu = QMenu(self)
+        edit_action = menu.addAction(self.window.tr("digitizer_edit"))
+        edit_action.setEnabled(len(self.canvas.selected_indices) == 1)
+        delete_action = menu.addAction(self.window.tr("digitizer_delete"))
+        chosen = menu.exec(position)
+        if chosen == edit_action: self.edit_selected()
+        elif chosen == delete_action: self.delete_selected()
+
+    def edit_selected(self) -> None:
+        if len(self.canvas.selected_indices) != 1 or self.canvas.roi is None: return
+        try:
+            limits = self.limits()
+            index = next(iter(self.canvas.selected_indices))
+            x, y = pixel_to_value(self.canvas.points[index], self.canvas.roi, limits,
+                                  self.x_log.isChecked(), self.y_log.isChecked(), self.canvas.calibration)
+        except (ValueError, KeyError, IndexError): return
+        dialog = QDialog(self); dialog.setWindowTitle(self.window.tr("digitizer_edit"))
+        form = QFormLayout(dialog); edits = []
+        for label, value in (("X", x), ("Y", y)):
+            field = QLineEdit(f"{value:.12g}"); field.setValidator(QDoubleValidator(field))
+            form.addRow(label, field); edits.append(field)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); form.addRow(buttons)
+        if dialog.exec() != QDialog.Accepted: return
+        try:
+            new_value = (float(edits[0].text()), float(edits[1].text()))
+            px, py = value_to_pixel(new_value, self.canvas.roi, limits,
+                                    self.x_log.isChecked(), self.y_log.isChecked(), self.canvas.calibration)
+            if not self.canvas.inside_roi((round(px), round(py))): raise ValueError()
+        except ValueError:
+            QMessageBox.warning(self, self.window.tr("digitizer_edit"), self.window.tr("digitizer_edit_bounds")); return
+        self.canvas.points[index] = (px, py)
+        self.canvas.selected_index = index; self.canvas.update(); self.canvas.changed.emit()
+
+    def update_point_status(self) -> None:
+        if self.canvas.selected_anchor:
+            name = self.canvas.selected_anchor
+            pixel = self.canvas.calibration.get(name)
+            if pixel is not None:
+                self.status.setText(f"{self.window.tr('digitizer_' + name)}: {self.fields[name][1].text()} ↔ {pixel:.2f} px")
+            return
+        if self.canvas.roi and len(self.canvas.calibration) < 4:
+            self.status.setText(self.window.tr("digitizer_need_calibration"))
+            return
+        index = self.canvas.selected_index
+        if index is None or index >= len(self.canvas.points) or not self.canvas.roi: return
+        try:
+            px, py = self.canvas.points[index]
+            x, y = pixel_to_value((px, py), self.canvas.roi, self.limits(), self.x_log.isChecked(), self.y_log.isChecked(), self.canvas.calibration)
+            self.status.setText(self.window.tr("digitizer_selected").format(x=x, y=y, px=px, py=py))
+        except ValueError:
+            pass
+
+    def choose_image(self) -> None:
+        if self.axis_worker is not None: return
+        path, _ = QFileDialog.getOpenFileName(self, self.window.tr("digitizer_choose"), "", self.window.tr("image_filter"))
+        if not path: return
+        try: self.canvas.load(path)
+        except Exception as exc: QMessageBox.critical(self, self.window.tr("open_failed"), str(exc)); return
+        self.source_path = path
+        for _, field in self.fields.values(): field.clear()
+        self.status.setText(Path(path).name)
+        self.axis_worker = AxisDetectWorker(self.canvas.rgb, self)
+        self.axis_worker.succeeded.connect(self.on_axes_detected)
+        self.axis_worker.finished.connect(self.on_axes_finished)
+        self.axis_worker.start(); self.update_actions()
+
+    def on_axes_detected(self, axes, ticks, origin) -> None:
+        if axes:
+            # Axis-line endpoints are geometry only: never display them as recognized ticks.
+            self.canvas.calibration = ticks
+            self.canvas.axis_origin = origin
+            self.canvas.update(); self.refresh_preview()
+            self.status.setText(self.window.tr("digitizer_axes_found") if len(ticks) == 4 else self.window.tr("digitizer_values_missing"))
+        else:
+            self.status.setText(self.window.tr("digitizer_axes_missing"))
+
+    def on_axes_finished(self) -> None:
+        worker = self.axis_worker; self.axis_worker = None
+        if worker: worker.deleteLater()
+        self.update_actions()
+
+    def pick_anchor(self, name: str) -> None:
+        self.canvas.mode = "anchor:" + name
+        self.status.setText(self.window.tr("digitizer_anchor_hint").format(label=self.window.tr("digitizer_" + name)))
+
+    def pick_color(self) -> None:
+        self.canvas.mode = "color"; self.status.setText(self.window.tr("digitizer_pick_color"))
+
+    def limits(self) -> tuple[float, float, float, float]:
+        values = tuple(float(self.fields[name][1].text()) for name in ("xmin", "xmax", "ymin", "ymax"))
+        if values[0] == values[1] or values[2] == values[3]: raise ValueError("Axis minimum and maximum must differ.")
+        if self.x_log.isChecked() and (values[0] <= 0 or values[1] <= 0): raise ValueError("Log X axis limits must be positive.")
+        if self.y_log.isChecked() and (values[2] <= 0 or values[3] <= 0): raise ValueError("Log Y axis limits must be positive.")
+        anchors = self.canvas.calibration
+        if len(anchors) != 4 or anchors["xmin"] == anchors["xmax"] or anchors["ymin"] == anchors["ymax"]:
+            raise ValueError("Choose two distinct tick positions on each axis.")
+        return values
+
+    def detect(self) -> None:
+        if self.worker or self.canvas.rgb is None or not self.canvas.roi or not self.canvas.sample: return
+        try: self.limits()
+        except ValueError as exc: QMessageBox.warning(self, self.window.tr("digitizer_error"), str(exc)); return
+        self.worker = ChartDetectWorker(self.canvas.rgb, self.canvas.roi, self.canvas.sample, str(self.mode_combo.currentData()), self)
+        self.worker.succeeded.connect(self.on_detected); self.worker.failed.connect(self.on_failed); self.worker.finished.connect(self.on_finished)
+        self.worker.start(); self.update_actions()
+
+    def on_detected(self, points: list) -> None:
+        self.canvas.points = points; self.canvas.selected_index = None; self.canvas.selected_indices.clear(); self.canvas.mode = "edit"
+        self.canvas.update(); self.refresh_preview()
+        self.status.setText(self.window.tr("digitizer_count").format(count=len(points)) if points else self.window.tr("digitizer_none"))
+
+    def on_failed(self, message: str) -> None:
+        QMessageBox.critical(self, self.window.tr("digitizer_error"), message)
+
+    def on_finished(self) -> None:
+        worker = self.worker; self.worker = None
+        if worker: worker.deleteLater()
+        self.update_actions()
+
+    def save_result(self) -> None:
+        if not self.canvas.points or not self.canvas.roi or not self.source_path: return
+        try: limits = self.limits()
+        except ValueError as exc: QMessageBox.warning(self, self.window.tr("digitizer_error"), str(exc)); return
+        suggested = str(Path(self.source_path).with_name(Path(self.source_path).stem + "_data.csv"))
+        destination, _ = QFileDialog.getSaveFileName(self, self.window.tr("digitizer_save"), suggested, "CSV (*.csv)")
+        if not destination: return
+        csv_path = Path(destination).with_suffix(".csv"); overlay_path = csv_path.with_name(csv_path.stem + "_overlay.png")
+        try:
+            write_csv(csv_path, self.canvas.points, self.canvas.roi, limits, self.x_log.isChecked(), self.y_log.isChecked(), self.canvas.calibration)
+            # Reproject the saved values so the overlay matches the exported CSV.
+            rgb = self.canvas.rgb.copy(); bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as saved_csv:
+                rows = list(csv.DictReader(saved_csv))
+            for row in rows:
+                x, y = value_to_pixel((float(row["x"]), float(row["y"])), self.canvas.roi, limits, self.x_log.isChecked(), self.y_log.isChecked(), self.canvas.calibration)
+                cv2.circle(bgr, (round(x), round(y)), 5, (255, 255, 255), 2)
+                cv2.circle(bgr, (round(x), round(y)), 3, (45, 55, 238), -1)
+            ok, encoded = cv2.imencode(".png", bgr)
+            if not ok: raise RuntimeError("Could not create overlay image.")
+            overlay_path.write_bytes(encoded.tobytes())
+        except Exception as exc:
+            QMessageBox.critical(self, self.window.tr("digitizer_error"), str(exc)); return
+        self.status.setText(self.window.tr("digitizer_saved").format(name=csv_path.name))
 
 
 class DxfPreviewWidget(QWidget):
@@ -1673,6 +2230,8 @@ class NiuBToolbox(QMainWindow):
         self.id_photo_btn.clicked.connect(lambda: self.show_tool(3)); side_layout.addWidget(self.id_photo_btn)
         self.dxf_btn = QPushButton(); self.dxf_btn.setObjectName("navButton"); self.dxf_btn.setCheckable(True)
         self.dxf_btn.clicked.connect(lambda: self.show_tool(8)); side_layout.addWidget(self.dxf_btn)
+        self.digitizer_btn = QPushButton(); self.digitizer_btn.setObjectName("navButton"); self.digitizer_btn.setCheckable(True)
+        self.digitizer_btn.clicked.connect(lambda: self.show_tool(9)); side_layout.addWidget(self.digitizer_btn)
         side_layout.addSpacing(12)
         self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); side_layout.addWidget(self.file_tools_label)
         self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
@@ -1714,7 +2273,9 @@ class NiuBToolbox(QMainWindow):
         self.word_panel = WordToPdfPanel(self)
         self.media_panel = MediaConverterPanel(self)
         self.dxf_panel = ImageToDxfPanel(self)
+        self.digitizer_panel = ChartDigitizerPanel(self)
         self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.enhance_panel); self.tool_stack.addWidget(self.id_photo_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.word_panel); self.tool_stack.addWidget(self.media_panel); self.tool_stack.addWidget(self.dxf_panel)
+        self.tool_stack.addWidget(self.digitizer_panel)
         body.addWidget(self.tool_stack, 1)
         self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
@@ -1726,6 +2287,7 @@ class NiuBToolbox(QMainWindow):
         self.enhance_btn.setChecked(index == 2)
         self.id_photo_btn.setChecked(index == 3)
         self.dxf_btn.setChecked(index == 8)
+        self.digitizer_btn.setChecked(index == 9)
         self.pdf_btn.setChecked(index == 4)
         self.caj_btn.setChecked(index == 5)
         self.word_btn.setChecked(index == 6)
@@ -1737,7 +2299,7 @@ class NiuBToolbox(QMainWindow):
     def update_nav_icons(self) -> None:
         colors = PALETTES[self.theme]
         buttons = (
-            (self.active_btn, "✦"), (self.compress_btn, "▣"), (self.enhance_btn, "◈"), (self.id_photo_btn, "●"), (self.dxf_btn, "⌁"),
+            (self.active_btn, "✦"), (self.compress_btn, "▣"), (self.enhance_btn, "◈"), (self.id_photo_btn, "●"), (self.dxf_btn, "⌁"), (self.digitizer_btn, "⌖"),
             (self.pdf_btn, "▤"), (self.caj_btn, "◫"), (self.word_btn, "W"), (self.media_btn, "▶"),
         )
         for button, symbol in buttons:
@@ -1774,6 +2336,7 @@ class NiuBToolbox(QMainWindow):
         self.enhance_btn.setText(self.tr("enhance_tool"))
         self.id_photo_btn.setText(self.tr("id_photo_tool"))
         self.dxf_btn.setText(self.tr("dxf_tool"))
+        self.digitizer_btn.setText(self.tr("digitizer_tool"))
         self.pdf_btn.setText(self.tr("pdf_tool"))
         self.caj_btn.setText(self.tr("caj_tool"))
         self.word_btn.setText(self.tr("word_tool"))
@@ -1821,6 +2384,7 @@ class NiuBToolbox(QMainWindow):
         self.caj_panel.retranslate()
         self.word_panel.retranslate()
         self.dxf_panel.retranslate()
+        self.digitizer_panel.retranslate()
 
     def toggle_theme(self) -> None:
         self.set_theme("light" if self.theme in DARK_THEMES else "dark")
@@ -2179,6 +2743,13 @@ class NiuBToolbox(QMainWindow):
         self.update_actions()
 
     def closeEvent(self, event) -> None:
+        if self.digitizer_panel.axis_worker is not None:
+            self.digitizer_panel.status.setText(self.tr("digitizer_axes_found"))
+            event.ignore(); return
+        if self.digitizer_panel.worker is not None:
+            self.digitizer_panel.status.setText(self.tr("digitizer_detect"))
+            event.ignore()
+            return
         if self.repair_worker is not None:
             self.status.setText(self.tr("wait_close"))
             event.ignore()
