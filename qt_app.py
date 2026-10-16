@@ -43,7 +43,7 @@ PALETTES = {
 
 DARK_THEMES = {"dark", "forest", "violet"}
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 COPYRIGHT_YEAR = "2026"
 COPYRIGHT_OWNER = "eastsheng"
 
