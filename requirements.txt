@@ -9,3 +9,4 @@ imageio-ffmpeg>=0.5,<0.7
 cajCvtPdf==0.1.2
 python-docx>=1.1,<2
 reportlab>=4.0,<5
+playwright>=1.45,<2

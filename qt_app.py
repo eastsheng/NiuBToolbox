@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QDoubleValidator, QIcon, QIm
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QColorDialog, QComboBox, QDialog, QFileDialog, QFrame, QGraphicsDropShadowEffect,
     QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QSlider,
-    QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+    QScrollArea, QSplitter, QStackedWidget, QStyle, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 )
 
 from tools.inpaint_engine import InpaintEngine
@@ -29,6 +29,7 @@ from tools.pdf_to_markdown import PdfToMarkdownConverter
 from tools.word_to_pdf import WordToPdfConverter
 from tools.image_to_dxf import ImageToDxfConverter
 from tools.chart_digitizer import detect_axes, detect_axis_ticks, detect_points, load_rgb, pixel_to_value, value_to_pixel, write_csv
+from tools.publication_counter_panel import PublicationCounterPanel
 
 
 PALETTES = {
@@ -224,6 +225,22 @@ TEXT = {
         "convert_word": "开始转换", "word_converting": "正在后台转换…",
         "word_requires_office": "未安装 Word/WPS 时，DOCX 将自动使用内置引擎转换；旧版 DOC 仍需办公软件",
         "word_failed": "Word 转 PDF 失败", "wait_close_word": "Word 文档仍在转换，请完成后再关闭",
+        "academic_tools": "学术工具", "publication_tool": "学术成果统计", "publication_title": "学术成果统计",
+        "publication_subtitle": "统计 Google Scholar 与 ResearchGate 主页中的逐年条目数；两个来源分别展示，不合并去重。",
+        "publication_scholar": "Google Scholar 链接", "publication_rg": "ResearchGate 链接",
+        "publication_years": "年份范围", "publication_to": "至", "publication_cookies": "Cookies 文件",
+        "publication_choose": "选择文件", "publication_chrome": "连接已登录 Chrome",
+        "publication_chrome_tip": "连接本机 9222 调试端口；Chrome 须以 --remote-debugging-port=9222 启动。",
+        "publication_headed": "显示独立浏览器", "publication_start": "开始统计",
+        "publication_csv": "导出 CSV", "publication_json": "导出 JSON",
+        "publication_source": "来源", "publication_name": "学者", "publication_year": "年份", "publication_count": "条目数",
+        "publication_idle": "填写至少一个主页链接后开始统计。", "publication_running": "正在读取主页；如出现登录或验证，请在浏览器中完成。",
+        "publication_error": "统计失败", "publication_need_url": "请至少填写一个主页链接。",
+        "publication_bad_years": "起始年份不能晚于结束年份。", "publication_bad_cookies": "Cookies 文件不存在。",
+        "publication_failed": "统计失败，请检查链接、浏览器连接或登录状态。",
+        "publication_unknown": "未知", "publication_total": "{start}–{end} 合计",
+        "publication_undated": "条无年份", "publication_empty": "没有获得结果。", "publication_saved": "已保存：{path}",
+        "publication_wait_close": "统计仍在运行，请完成后再关闭。",
     },
     "en": {
         "app": "NiuB Toolbox", "my_tools": "My Tools", "image_processing": "Image Processing", "file_processing": "File Processing", "watermark": "AI Watermark Remover",
@@ -355,6 +372,22 @@ TEXT = {
         "convert_word": "Convert", "word_converting": "Converting in the background…",
         "word_requires_office": "DOCX uses the built-in engine when Word/WPS is unavailable; legacy DOC still requires office software",
         "word_failed": "Word to PDF Failed", "wait_close_word": "Word conversion is still running. Please wait before closing.",
+        "academic_tools": "Academic Tools", "publication_tool": "Publication Count", "publication_title": "Academic Publications",
+        "publication_subtitle": "Count yearly profile entries on Google Scholar and ResearchGate. Sources are shown separately, without cross-source deduplication.",
+        "publication_scholar": "Google Scholar URL", "publication_rg": "ResearchGate URL",
+        "publication_years": "Year range", "publication_to": "to", "publication_cookies": "Cookies file",
+        "publication_choose": "Browse", "publication_chrome": "Use signed-in Chrome",
+        "publication_chrome_tip": "Connect to local port 9222. Start Chrome with --remote-debugging-port=9222 first.",
+        "publication_headed": "Show separate browser", "publication_start": "Count Publications",
+        "publication_csv": "Export CSV", "publication_json": "Export JSON",
+        "publication_source": "Source", "publication_name": "Researcher", "publication_year": "Year", "publication_count": "Entries",
+        "publication_idle": "Enter at least one profile URL to begin.", "publication_running": "Reading profiles. Complete any login or verification in the browser.",
+        "publication_error": "Count Failed", "publication_need_url": "Enter at least one profile URL.",
+        "publication_bad_years": "Start year must not exceed end year.", "publication_bad_cookies": "Cookies file does not exist.",
+        "publication_failed": "Could not count publications. Check URLs, browser connection, and login status.",
+        "publication_unknown": "Unknown", "publication_total": "{start}–{end} total",
+        "publication_undated": "without year", "publication_empty": "No results.", "publication_saved": "Saved: {path}",
+        "publication_wait_close": "Publication counting is still running. Please wait before closing.",
     },
 }
 
@@ -2395,31 +2428,40 @@ class NiuBToolbox(QMainWindow):
         body = QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0); root.addLayout(body)
 
         side = QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(210); self.sidebar = side
-        side_layout = QVBoxLayout(side); side_layout.setContentsMargins(12, 22, 12, 14)
-        self.tools_label = QLabel(); self.tools_label.setObjectName("muted"); side_layout.addWidget(self.tools_label)
+        side_layout = QVBoxLayout(side); side_layout.setContentsMargins(12, 14, 12, 14)
+        nav_scroll = QScrollArea(); nav_scroll.setWidgetResizable(True); nav_scroll.setFrameShape(QFrame.NoFrame)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        nav_scroll.setStyleSheet("QScrollArea { background: transparent; border: 0; } QScrollArea > QWidget > QWidget { background: transparent; }")
+        nav_host = QWidget(); nav_layout = QVBoxLayout(nav_host); nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_scroll.setWidget(nav_host); side_layout.addWidget(nav_scroll, 1)
+        self.tools_label = QLabel(); self.tools_label.setObjectName("muted"); nav_layout.addWidget(self.tools_label)
         self.active_btn = QPushButton(); self.active_btn.setObjectName("navButton"); self.active_btn.setCheckable(True)
-        self.active_btn.clicked.connect(lambda: self.show_tool(0)); side_layout.addWidget(self.active_btn)
+        self.active_btn.clicked.connect(lambda: self.show_tool(0)); nav_layout.addWidget(self.active_btn)
         self.compress_btn = QPushButton(); self.compress_btn.setObjectName("navButton"); self.compress_btn.setCheckable(True)
-        self.compress_btn.clicked.connect(lambda: self.show_tool(1)); side_layout.addWidget(self.compress_btn)
+        self.compress_btn.clicked.connect(lambda: self.show_tool(1)); nav_layout.addWidget(self.compress_btn)
         self.enhance_btn = QPushButton(); self.enhance_btn.setObjectName("navButton"); self.enhance_btn.setCheckable(True)
-        self.enhance_btn.clicked.connect(lambda: self.show_tool(2)); side_layout.addWidget(self.enhance_btn)
+        self.enhance_btn.clicked.connect(lambda: self.show_tool(2)); nav_layout.addWidget(self.enhance_btn)
         self.id_photo_btn = QPushButton(); self.id_photo_btn.setObjectName("navButton"); self.id_photo_btn.setCheckable(True)
-        self.id_photo_btn.clicked.connect(lambda: self.show_tool(3)); side_layout.addWidget(self.id_photo_btn)
+        self.id_photo_btn.clicked.connect(lambda: self.show_tool(3)); nav_layout.addWidget(self.id_photo_btn)
         self.dxf_btn = QPushButton(); self.dxf_btn.setObjectName("navButton"); self.dxf_btn.setCheckable(True)
-        self.dxf_btn.clicked.connect(lambda: self.show_tool(8)); side_layout.addWidget(self.dxf_btn)
+        self.dxf_btn.clicked.connect(lambda: self.show_tool(8)); nav_layout.addWidget(self.dxf_btn)
         self.digitizer_btn = QPushButton(); self.digitizer_btn.setObjectName("navButton"); self.digitizer_btn.setCheckable(True)
-        self.digitizer_btn.clicked.connect(lambda: self.show_tool(9)); side_layout.addWidget(self.digitizer_btn)
-        side_layout.addSpacing(12)
-        self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); side_layout.addWidget(self.file_tools_label)
+        self.digitizer_btn.clicked.connect(lambda: self.show_tool(9)); nav_layout.addWidget(self.digitizer_btn)
+        nav_layout.addSpacing(12)
+        self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); nav_layout.addWidget(self.file_tools_label)
         self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
-        self.pdf_btn.clicked.connect(lambda: self.show_tool(4)); side_layout.addWidget(self.pdf_btn)
+        self.pdf_btn.clicked.connect(lambda: self.show_tool(4)); nav_layout.addWidget(self.pdf_btn)
         self.caj_btn = QPushButton(); self.caj_btn.setObjectName("navButton"); self.caj_btn.setCheckable(True)
-        self.caj_btn.clicked.connect(lambda: self.show_tool(5)); side_layout.addWidget(self.caj_btn)
+        self.caj_btn.clicked.connect(lambda: self.show_tool(5)); nav_layout.addWidget(self.caj_btn)
         self.word_btn = QPushButton(); self.word_btn.setObjectName("navButton"); self.word_btn.setCheckable(True)
-        self.word_btn.clicked.connect(lambda: self.show_tool(6)); side_layout.addWidget(self.word_btn)
+        self.word_btn.clicked.connect(lambda: self.show_tool(6)); nav_layout.addWidget(self.word_btn)
         self.media_btn = QPushButton(); self.media_btn.setObjectName("navButton"); self.media_btn.setCheckable(True)
-        self.media_btn.clicked.connect(lambda: self.show_tool(7)); side_layout.addWidget(self.media_btn)
-        side_layout.addStretch()
+        self.media_btn.clicked.connect(lambda: self.show_tool(7)); nav_layout.addWidget(self.media_btn)
+        nav_layout.addSpacing(12)
+        self.scholar_tools_label = QLabel(); self.scholar_tools_label.setObjectName("muted"); nav_layout.addWidget(self.scholar_tools_label)
+        self.publication_btn = QPushButton(); self.publication_btn.setObjectName("navButton"); self.publication_btn.setCheckable(True)
+        self.publication_btn.clicked.connect(lambda: self.show_tool(10)); nav_layout.addWidget(self.publication_btn)
+        nav_layout.addStretch()
         self.settings_btn = QPushButton("⚙   设置"); self.settings_btn.clicked.connect(lambda: SettingsDialog(self).exec()); side_layout.addWidget(self.settings_btn)
         body.addWidget(side)
 
@@ -2451,8 +2493,10 @@ class NiuBToolbox(QMainWindow):
         self.media_panel = MediaConverterPanel(self)
         self.dxf_panel = ImageToDxfPanel(self)
         self.digitizer_panel = ChartDigitizerPanel(self)
+        self.publication_panel = PublicationCounterPanel(self)
         self.tool_stack = QStackedWidget(); self.tool_stack.addWidget(content); self.tool_stack.addWidget(self.compress_panel); self.tool_stack.addWidget(self.enhance_panel); self.tool_stack.addWidget(self.id_photo_panel); self.tool_stack.addWidget(self.pdf_panel); self.tool_stack.addWidget(self.caj_panel); self.tool_stack.addWidget(self.word_panel); self.tool_stack.addWidget(self.media_panel); self.tool_stack.addWidget(self.dxf_panel)
         self.tool_stack.addWidget(self.digitizer_panel)
+        self.tool_stack.addWidget(self.publication_panel)
         body.addWidget(self.tool_stack, 1)
         self.show_tool(0)
         self.setCentralWidget(host); self.update_actions()
@@ -2469,6 +2513,7 @@ class NiuBToolbox(QMainWindow):
         self.caj_btn.setChecked(index == 5)
         self.word_btn.setChecked(index == 6)
         self.media_btn.setChecked(index == 7)
+        self.publication_btn.setChecked(index == 10)
         if self.styleSheet():
             self._repolish_theme(self.tool_stack.currentWidget())
         self.update_nav_icons()
@@ -2477,7 +2522,7 @@ class NiuBToolbox(QMainWindow):
         colors = PALETTES[self.theme]
         buttons = (
             (self.active_btn, "✦"), (self.compress_btn, "▣"), (self.enhance_btn, "◈"), (self.id_photo_btn, "●"), (self.dxf_btn, "⌁"), (self.digitizer_btn, "⌖"),
-            (self.pdf_btn, "▤"), (self.caj_btn, "◫"), (self.word_btn, "W"), (self.media_btn, "▶"),
+            (self.pdf_btn, "▤"), (self.caj_btn, "◫"), (self.word_btn, "W"), (self.media_btn, "▶"), (self.publication_btn, "▥"),
         )
         for button, symbol in buttons:
             button.setIcon(symbol_icon(symbol, colors["red"] if button.isChecked() else colors["text"]))
@@ -2508,6 +2553,7 @@ class NiuBToolbox(QMainWindow):
         self.titlebar.retranslate()
         self.tools_label.setText(self.tr("image_processing"))
         self.file_tools_label.setText(self.tr("file_processing"))
+        self.scholar_tools_label.setText(self.tr("academic_tools"))
         self.active_btn.setText(self.tr("watermark"))
         self.compress_btn.setText(self.tr("compress_tool"))
         self.enhance_btn.setText(self.tr("enhance_tool"))
@@ -2518,6 +2564,7 @@ class NiuBToolbox(QMainWindow):
         self.caj_btn.setText(self.tr("caj_tool"))
         self.word_btn.setText(self.tr("word_tool"))
         self.media_btn.setText(self.tr("media_tool"))
+        self.publication_btn.setText(self.tr("publication_tool"))
         self.settings_btn.setText(self.tr("settings"))
         self.settings_btn.setToolTip(self.tr("tip_settings"))
         self.page_title.setText(self.tr("watermark"))
@@ -2562,6 +2609,7 @@ class NiuBToolbox(QMainWindow):
         self.word_panel.retranslate()
         self.dxf_panel.retranslate()
         self.digitizer_panel.retranslate()
+        self.publication_panel.retranslate()
 
     def toggle_theme(self) -> None:
         self.set_theme("light" if self.theme in DARK_THEMES else "dark")
@@ -2925,6 +2973,9 @@ class NiuBToolbox(QMainWindow):
         self.update_actions()
 
     def closeEvent(self, event) -> None:
+        if self.publication_panel.worker is not None and self.publication_panel.worker.isRunning():
+            self.publication_panel.summary.setText(self.tr("publication_wait_close"))
+            event.ignore(); return
         if self.digitizer_panel.axis_worker is not None:
             self.digitizer_panel.status.setText(self.tr("digitizer_axes_found"))
             event.ignore(); return

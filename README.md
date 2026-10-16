@@ -4,7 +4,9 @@ English | [简体中文](README_ZH.md)
 
 NiuB Toolbox is a lightweight Windows desktop application for everyday image processing and file conversion. It provides a clean bilingual interface, light and dark themes, resizable windows, and background processing to keep the application responsive.
 
-All processing runs locally. Generated results are written to your chosen location only after you click **Save Result** or **Export**.
+It also includes an academic publication counter for public Google Scholar and ResearchGate profiles. Enter one or both profile URLs and a year range to view yearly counts and export CSV or JSON. The two sources are reported separately because their entries may overlap.
+
+Image and file processing runs locally. Generated results are written to your chosen location only after you click **Save Result** or **Export**. Publication counting visits the profile websites you enter.
 
 ## Download
 
@@ -36,6 +38,7 @@ Requires 64-bit Windows 10/11 and Python 3.11.
 git clone https://github.com/eastsheng/NiuBToolbox.git
 cd NiuBToolbox
 python -m pip install -r requirements.txt
+python -m playwright install chromium
 python qt_app.py
 ```
 
@@ -44,3 +47,4 @@ You can also double-click `run.bat` after installing the dependencies.
 ## Privacy
 
 Images and files remain on your computer and are not uploaded by NiuB Toolbox.
+The publication counter visits the profile URLs you provide. ResearchGate may require a login or verification; you can connect a signed-in Chrome started with `--remote-debugging-port=9222`, or use a separate browser and a Playwright cookies file. Counts reflect entries available on each profile, not necessarily the researcher's complete publication record.
