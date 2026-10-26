@@ -273,13 +273,23 @@ async def run(args: argparse.Namespace) -> list[SourceResult]:
         else:
             profile_dir = Path(getattr(args, "profile_dir", None) or
                                Path(os.environ.get("LOCALAPPDATA", Path.home())) / "NiuBToolbox" / "scholar_browser_profile")
-            context = await playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile_dir),
-                headless=not args.headed,
-                locale="zh-CN",
-                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
-            )
+            browser_options = {}
+            if getattr(sys, "frozen", False):
+                chrome = Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe"
+                edge = Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")) / "Microsoft/Edge/Application/msedge.exe"
+                if chrome.is_file():
+                    browser_options["channel"] = "chrome"
+                elif edge.is_file():
+                    browser_options["channel"] = "msedge"
+            try:
+                context = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_dir),
+                    headless=not args.headed,
+                    locale="zh-CN",
+                    **browser_options,
+                )
+            except Exception as exc:
+                raise RuntimeError("无法启动浏览器。请安装 Chrome 或 Edge，或连接已登录的 Chrome。") from exc
         if args.cookies:
             await load_cookies(context, args.cookies)
         results: list[SourceResult] = []

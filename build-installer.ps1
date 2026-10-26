@@ -9,6 +9,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir --distpath dist-sy
   --icon "assets\app-icon.ico" `
   --add-data "assets;assets" `
   --collect-all cajCvtPdf `
+  --collect-all playwright `
   --exclude-module tkinter `
   --exclude-module _tkinter `
   --exclude-module PIL.ImageTk `

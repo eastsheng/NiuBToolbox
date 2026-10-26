@@ -166,6 +166,7 @@ TEXT = {
         "enhance_failed": "图片增强失败", "wait_close_enhance": "图片仍在增强，请完成后再关闭",
         "id_photo_tool": "证件照生成", "id_photo_title": "证件照生成",
         "id_photo_subtitle": "使用本地 AI 抠出人像，并替换为纯色或渐变背景",
+        "id_photo_clear": "清除照片", "id_photo_clear_tip": "从界面移除当前照片和生成结果，不删除原文件",
         "choose_id_photo": "选择人像照片", "no_id_photo": "请选择一张正面人像照片",
         "id_photo_size": "证件照尺寸", "one_inch": "一寸（295 × 413 px）", "two_inch": "二寸（413 × 579 px）",
         "id_background": "背景样式", "background_blue": "蓝底", "background_red": "红底",
@@ -313,6 +314,7 @@ TEXT = {
         "enhance_failed": "Image Enhancement Failed", "wait_close_enhance": "Image enhancement is still running. Please wait before closing.",
         "id_photo_tool": "ID Photo", "id_photo_title": "ID Photo Generator",
         "id_photo_subtitle": "Extract portraits with local AI and apply a solid or gradient background",
+        "id_photo_clear": "Clear Photo", "id_photo_clear_tip": "Remove the current photo and generated result from this page without deleting the original file",
         "choose_id_photo": "Choose Portrait", "no_id_photo": "Choose a front-facing portrait photo",
         "id_photo_size": "Photo Size", "one_inch": "1-inch (295 × 413 px)", "two_inch": "2-inch (413 × 579 px)",
         "id_background": "Background", "background_blue": "Blue", "background_red": "Red",
@@ -1882,6 +1884,7 @@ class IdPhotoPanel(QWidget):
         self.download_btn = QPushButton(); self.download_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.MODEL_URL))); model_row.addWidget(self.download_btn); controls.addLayout(model_row)
         self.model_hint = QLabel(); self.model_hint.setObjectName("muted"); controls.addWidget(self.model_hint)
         actions = QHBoxLayout(); self.choose_btn = QPushButton(); self.choose_btn.setObjectName("primary"); self.choose_btn.clicked.connect(self.choose_image); actions.addWidget(self.choose_btn)
+        self.clear_btn = QPushButton(); self.clear_btn.clicked.connect(self.clear_image); actions.addWidget(self.clear_btn)
         self.generate_btn = QPushButton(); self.generate_btn.clicked.connect(self.generate_photo); actions.addWidget(self.generate_btn)
         self.open_btn = QPushButton(); self.open_btn.clicked.connect(self.save_output); actions.addWidget(self.open_btn); controls.addLayout(actions)
         self.progress = QProgressBar(); self.progress.setRange(0, 100); self.progress.setTextVisible(False); controls.addWidget(self.progress)
@@ -1906,7 +1909,9 @@ class IdPhotoPanel(QWidget):
         for index, key in enumerate(("background_blue", "background_red", "background_white", "background_gradient", "background_custom")): self.background_combo.setItemText(index, t(key))
         self.primary_btn.setText(t("primary_color")); self.secondary_btn.setText(t("secondary_color"))
         self.model_btn.setText(t("choose_id_model")); self.download_btn.setText(t("download_id_model")); self.model_hint.setText(t("id_model_hint"))
-        self.choose_btn.setText(t("choose_id_photo")); self.generate_btn.setText(t("generate_id_photo")); self.open_btn.setText(t("save_result"))
+        self.choose_btn.setText(t("choose_id_photo")); self.clear_btn.setText(t("id_photo_clear"))
+        self.clear_btn.setToolTip(t("id_photo_clear_tip"))
+        self.generate_btn.setText(t("generate_id_photo")); self.open_btn.setText(t("save_result"))
         if self.source_path is None:
             self.file_label.setText(t("no_id_photo")); self.preview.setText(t("no_id_photo"))
         self.update_model_label(); self.update_color_buttons()
@@ -1953,9 +1958,20 @@ class IdPhotoPanel(QWidget):
         discard_staged_output(self.output_path); self.source_path = path; self.output_path = None; self.file_label.setText(Path(path).name)
         self.preview.setText(""); self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)); self.status.setText(""); self.update_actions()
 
+    def clear_image(self) -> None:
+        if self.worker is not None:
+            return
+        discard_staged_output(self.output_path)
+        self.source_path = None; self.output_path = None
+        self.preview.clear(); self.preview.setText(self.window.tr("no_id_photo"))
+        self.file_label.setText(self.window.tr("no_id_photo"))
+        self.progress.setRange(0, 100); self.progress.setValue(0)
+        self.status.clear(); self.update_actions()
+
     def update_actions(self) -> None:
         busy = self.worker is not None
         for widget in (self.choose_btn, self.model_btn, self.download_btn, self.size_combo, self.background_combo, self.primary_btn, self.secondary_btn): widget.setEnabled(not busy)
+        self.clear_btn.setEnabled((self.source_path is not None or self.output_path is not None) and not busy)
         self.generate_btn.setEnabled(self.source_path is not None and self.resolved_model() is not None and not busy)
         self.open_btn.setEnabled(self.output_path is not None and not busy)
 
@@ -2416,11 +2432,13 @@ class NiuBToolbox(QMainWindow):
     def _build_ui(self) -> None:
         host = QWidget()
         host_layout = QVBoxLayout(host)
+        self.host_layout = host_layout
         host_layout.setContentsMargins(12, 12, 12, 12)
         self.card = QFrame()
         self.card.setObjectName("windowCard")
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(28); shadow.setOffset(0, 6); shadow.setColor(QColor(0, 0, 0, 80))
+        self.window_shadow = shadow
         self.card.setGraphicsEffect(shadow)
         host_layout.addWidget(self.card)
         root = QVBoxLayout(self.card); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
@@ -2432,36 +2450,49 @@ class NiuBToolbox(QMainWindow):
         nav_scroll = QScrollArea(); nav_scroll.setWidgetResizable(True); nav_scroll.setFrameShape(QFrame.NoFrame)
         nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         nav_scroll.setStyleSheet("QScrollArea { background: transparent; border: 0; } QScrollArea > QWidget > QWidget { background: transparent; }")
-        nav_host = QWidget(); nav_layout = QVBoxLayout(nav_host); nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_host = QWidget(); nav_layout = QVBoxLayout(nav_host)
+        nav_layout.setContentsMargins(0, 0, 0, 0); nav_layout.setSpacing(3)
         nav_scroll.setWidget(nav_host); side_layout.addWidget(nav_scroll, 1)
-        self.tools_label = QLabel(); self.tools_label.setObjectName("muted"); nav_layout.addWidget(self.tools_label)
+        self.nav_sections: dict[str, tuple[QPushButton, QWidget]] = {}
+
+        def add_section(name: str) -> QVBoxLayout:
+            header = QPushButton(); header.setObjectName("navFolder"); header.setCheckable(True)
+            header.clicked.connect(lambda checked, key=name: self.toggle_nav_section(key, checked))
+            nav_layout.addWidget(header)
+            contents = QWidget(); contents.setObjectName("navFolderContents")
+            contents_layout = QVBoxLayout(contents)
+            contents_layout.setContentsMargins(12, 0, 0, 3); contents_layout.setSpacing(2)
+            nav_layout.addWidget(contents)
+            self.nav_sections[name] = (header, contents)
+            return contents_layout
+
+        image_nav = add_section("image_processing")
         self.active_btn = QPushButton(); self.active_btn.setObjectName("navButton"); self.active_btn.setCheckable(True)
-        self.active_btn.clicked.connect(lambda: self.show_tool(0)); nav_layout.addWidget(self.active_btn)
+        self.active_btn.clicked.connect(lambda: self.show_tool(0)); image_nav.addWidget(self.active_btn)
         self.compress_btn = QPushButton(); self.compress_btn.setObjectName("navButton"); self.compress_btn.setCheckable(True)
-        self.compress_btn.clicked.connect(lambda: self.show_tool(1)); nav_layout.addWidget(self.compress_btn)
+        self.compress_btn.clicked.connect(lambda: self.show_tool(1)); image_nav.addWidget(self.compress_btn)
         self.enhance_btn = QPushButton(); self.enhance_btn.setObjectName("navButton"); self.enhance_btn.setCheckable(True)
-        self.enhance_btn.clicked.connect(lambda: self.show_tool(2)); nav_layout.addWidget(self.enhance_btn)
+        self.enhance_btn.clicked.connect(lambda: self.show_tool(2)); image_nav.addWidget(self.enhance_btn)
         self.id_photo_btn = QPushButton(); self.id_photo_btn.setObjectName("navButton"); self.id_photo_btn.setCheckable(True)
-        self.id_photo_btn.clicked.connect(lambda: self.show_tool(3)); nav_layout.addWidget(self.id_photo_btn)
+        self.id_photo_btn.clicked.connect(lambda: self.show_tool(3)); image_nav.addWidget(self.id_photo_btn)
         self.dxf_btn = QPushButton(); self.dxf_btn.setObjectName("navButton"); self.dxf_btn.setCheckable(True)
-        self.dxf_btn.clicked.connect(lambda: self.show_tool(8)); nav_layout.addWidget(self.dxf_btn)
+        self.dxf_btn.clicked.connect(lambda: self.show_tool(8)); image_nav.addWidget(self.dxf_btn)
         self.digitizer_btn = QPushButton(); self.digitizer_btn.setObjectName("navButton"); self.digitizer_btn.setCheckable(True)
-        self.digitizer_btn.clicked.connect(lambda: self.show_tool(9)); nav_layout.addWidget(self.digitizer_btn)
-        nav_layout.addSpacing(12)
-        self.file_tools_label = QLabel(); self.file_tools_label.setObjectName("muted"); nav_layout.addWidget(self.file_tools_label)
+        self.digitizer_btn.clicked.connect(lambda: self.show_tool(9)); image_nav.addWidget(self.digitizer_btn)
+        file_nav = add_section("file_processing")
         self.pdf_btn = QPushButton(); self.pdf_btn.setObjectName("navButton"); self.pdf_btn.setCheckable(True)
-        self.pdf_btn.clicked.connect(lambda: self.show_tool(4)); nav_layout.addWidget(self.pdf_btn)
+        self.pdf_btn.clicked.connect(lambda: self.show_tool(4)); file_nav.addWidget(self.pdf_btn)
         self.caj_btn = QPushButton(); self.caj_btn.setObjectName("navButton"); self.caj_btn.setCheckable(True)
-        self.caj_btn.clicked.connect(lambda: self.show_tool(5)); nav_layout.addWidget(self.caj_btn)
+        self.caj_btn.clicked.connect(lambda: self.show_tool(5)); file_nav.addWidget(self.caj_btn)
         self.word_btn = QPushButton(); self.word_btn.setObjectName("navButton"); self.word_btn.setCheckable(True)
-        self.word_btn.clicked.connect(lambda: self.show_tool(6)); nav_layout.addWidget(self.word_btn)
+        self.word_btn.clicked.connect(lambda: self.show_tool(6)); file_nav.addWidget(self.word_btn)
         self.media_btn = QPushButton(); self.media_btn.setObjectName("navButton"); self.media_btn.setCheckable(True)
-        self.media_btn.clicked.connect(lambda: self.show_tool(7)); nav_layout.addWidget(self.media_btn)
-        nav_layout.addSpacing(12)
-        self.scholar_tools_label = QLabel(); self.scholar_tools_label.setObjectName("muted"); nav_layout.addWidget(self.scholar_tools_label)
+        self.media_btn.clicked.connect(lambda: self.show_tool(7)); file_nav.addWidget(self.media_btn)
+        academic_nav = add_section("academic_tools")
         self.publication_btn = QPushButton(); self.publication_btn.setObjectName("navButton"); self.publication_btn.setCheckable(True)
-        self.publication_btn.clicked.connect(lambda: self.show_tool(10)); nav_layout.addWidget(self.publication_btn)
+        self.publication_btn.clicked.connect(lambda: self.show_tool(10)); academic_nav.addWidget(self.publication_btn)
         nav_layout.addStretch()
+        self.toggle_nav_section("image_processing", True)
         self.settings_btn = QPushButton("⚙   设置"); self.settings_btn.clicked.connect(lambda: SettingsDialog(self).exec()); side_layout.addWidget(self.settings_btn)
         body.addWidget(side)
 
@@ -2518,6 +2549,19 @@ class NiuBToolbox(QMainWindow):
             self._repolish_theme(self.tool_stack.currentWidget())
         self.update_nav_icons()
 
+    def toggle_nav_section(self, name: str, expanded: bool) -> None:
+        """Keep one folder open at a time so the sidebar remains compact."""
+        for key, (header, contents) in self.nav_sections.items():
+            is_open = key == name and expanded
+            header.setChecked(is_open)
+            contents.setVisible(is_open)
+        self.update_nav_section_titles()
+
+    def update_nav_section_titles(self) -> None:
+        for key, (header, _) in self.nav_sections.items():
+            arrow = "▾" if header.isChecked() else "▸"
+            header.setText(f"{arrow}   {self.tr(key)}")
+
     def update_nav_icons(self) -> None:
         colors = PALETTES[self.theme]
         buttons = (
@@ -2551,9 +2595,7 @@ class NiuBToolbox(QMainWindow):
         self.setWindowTitle(self.tr("app"))
         QApplication.instance().setApplicationName(self.tr("app"))
         self.titlebar.retranslate()
-        self.tools_label.setText(self.tr("image_processing"))
-        self.file_tools_label.setText(self.tr("file_processing"))
-        self.scholar_tools_label.setText(self.tr("academic_tools"))
+        self.update_nav_section_titles()
         self.active_btn.setText(self.tr("watermark"))
         self.compress_btn.setText(self.tr("compress_tool"))
         self.enhance_btn.setText(self.tr("enhance_tool"))
@@ -2659,6 +2701,7 @@ class NiuBToolbox(QMainWindow):
                     #primary{themed} {{ background:{colors['red']}; color:white; }}
                     #primary{themed}:hover {{ background:{colors['red']}; color:white; }}
                     QPushButton#navButton{themed}:checked {{ background:{colors['hover']}; color:{colors['red']}; }}
+                    QPushButton#navFolder{themed}:checked {{ background:{colors['hover']}; color:{colors['text']}; }}
                     #closeButton{themed}:hover {{ background:{colors['red']}; color:white; }}
                     #toolbar{themed} {{ background:{colors['card']}; border-color:{colors['line']}; }}
                     #previewCard{themed}, #imageCanvas{themed} {{ background:{colors['canvas']}; border-color:{colors['line']}; }}
@@ -2678,11 +2721,13 @@ class NiuBToolbox(QMainWindow):
             self.setStyleSheet(f"""
             QWidget {{ color:palette(text); font-family:'Microsoft YaHei UI'; font-size:13px; }}
             #windowCard {{ background:palette(base); border:1px solid palette(mid); border-radius:18px; }}
+            #windowCard[fullBleed="true"] {{ border:0; border-radius:0; }}
             #sidebar {{
                 background:palette(alternate-base);
                 border-right:1px solid palette(mid);
                 border-bottom-left-radius:17px;
             }}
+            #sidebar[fullBleed="true"] {{ border-bottom-left-radius:0; }}
             #logo {{ background:palette(highlight); color:white; border-radius:7px; font-weight:700; }}
             #pageTitle {{ font-size:22px; font-weight:700; }} #muted {{ color:palette(placeholder-text); font-size:11px; }}
             QPushButton {{ background:transparent; border:1px solid palette(mid); border-radius:7px; padding:7px 13px; }} QPushButton:hover {{ background:palette(button); }} QPushButton:disabled {{ color:palette(placeholder-text); }}
@@ -2690,6 +2735,8 @@ class NiuBToolbox(QMainWindow):
             #primary {{ background:palette(highlight); color:white; border:0; font-weight:600; }} #primary:hover {{ background:#d93636; }}
             QPushButton#navButton {{ border:0; text-align:left; padding:10px; }}
             QPushButton#navButton:checked {{ background:palette(button); color:palette(highlight); font-weight:600; }}
+            QPushButton#navFolder {{ border:0; text-align:left; padding:9px 11px; font-weight:700; min-height:20px; }}
+            QPushButton#navFolder:hover {{ background:palette(button); }}
             #windowButton, #closeButton {{ border:0; border-radius:6px; min-width:34px; max-width:34px; min-height:34px; max-height:34px; padding:0; }} #closeButton:hover {{ background:palette(highlight); color:white; }}
             #toolbar {{ background:palette(base); border:1px solid palette(mid); border-radius:10px; }}
             QFrame#axisGroup {{ background:palette(alternate-base); border:1px solid palette(mid); border-radius:9px; }}
@@ -2751,7 +2798,29 @@ class NiuBToolbox(QMainWindow):
 
     def toggle_maximize(self) -> None:
         self.showNormal() if self.isMaximized() else self.showMaximized()
+        self._sync_maximized_appearance()
         self.titlebar.update_icons()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange and hasattr(self, "host_layout"):
+            self._sync_maximized_appearance()
+            if hasattr(self, "titlebar"):
+                self.titlebar.update_icons()
+
+    def _sync_maximized_appearance(self) -> None:
+        maximized = self.isMaximized()
+        margin = 0 if maximized else 12
+        self.host_layout.setContentsMargins(margin, margin, margin, margin)
+        self.window_shadow.setEnabled(not maximized)
+        for widget in (self.card, self.sidebar):
+            if widget.property("fullBleed") != maximized:
+                widget.setProperty("fullBleed", maximized)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+                widget.update()
+        for handle in getattr(self, "resize_handles", ()):
+            handle.setVisible(not maximized)
 
     def _resize_edges(self, global_position) -> Qt.Edges:
         if self.isMaximized():
@@ -2833,7 +2902,7 @@ class NiuBToolbox(QMainWindow):
             return super().eventFilter(watched, event)
 
         if isinstance(event, QMouseEvent) and event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-            if not self._inside_button(watched):
+            if not self.isMaximized() and not self._inside_button(watched):
                 edges = watched.property("resizeEdges") or self._resize_edges(event.globalPosition())
                 if edges:
                     self._resize_drag = (edges, event.globalPosition().toPoint(), self.geometry())
